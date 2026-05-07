@@ -29,7 +29,7 @@ interface ContestSettings {
 export default function AdminDashboard({ lang }: { lang: Lang }) {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [evaluators, setEvaluators] = useState<Evaluator[]>([]);
-  const [stats, setStats] = useState({ total: 0, catA: 0, catB: 0 });
+  const [stats, setStats] = useState({ total: 0, catA: 0, catB: 0, uniqueEmails: 0 });
   const [newEvalName, setNewEvalName] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"stats" | "photos" | "evaluators" | "settings">("stats");
@@ -639,10 +639,51 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
         )}
         {activeTab === "stats" && (
           <div className="space-y-10">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <StatCard label={lang === "sk" ? "Celkom fotografií" : "Total Photos"} value={stats.total} />
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              <StatCard label={lang === "sk" ? "Fotografie celkom" : "Total Photos"} value={stats.total} />
+              <StatCard label={lang === "sk" ? "Počet autorov" : "Total Authors"} value={stats.uniqueEmails} />
               <StatCard label={lang === "sk" ? "Kategória A" : "Category A"} value={stats.catA} />
               <StatCard label={lang === "sk" ? "Kategória B" : "Category B"} value={stats.catB} />
+            </div>
+
+            {/* Public Choice Leaderboard */}
+            <div className="bg-paper border border-border p-8 space-y-6">
+              <div className="flex items-center justify-between border-b border-border pb-4">
+                <div className="flex items-center gap-3">
+                  <Heart size={20} className="text-accent" />
+                  <h3 className="text-[12px] font-bold uppercase tracking-[2px]">
+                    {lang === "sk" ? "Cena verejnosti - Priebežný rebríček" : "Public Choice - Current Standings"}
+                  </h3>
+                </div>
+                <span className="text-[10px] font-bold text-muted uppercase tracking-widest">
+                  {Object.values(publicResults).reduce((a, b) => a + b, 0)} {lang === "sk" ? "hlasov celkom" : "total votes"}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                 {Object.entries(publicResults)
+                   .sort(([, a], [, b]) => b - a)
+                   .slice(0, 6)
+                   .map(([id, count]) => {
+                     const photo = photos.find(p => p.id === id);
+                     if (!photo) return null;
+                     return (
+                       <div key={id} className="flex items-center gap-4 p-3 border border-border bg-white group hover:border-accent transition-colors">
+                         <div className="w-12 h-12 bg-muted shrink-0 overflow-hidden">
+                           <img src={`/uploads/${photo.webPath || photo.path}`} className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all" alt="" />
+                         </div>
+                         <div className="flex-1 min-w-0">
+                           <p className="text-[10px] font-bold truncate tracking-tight">{photo.name}</p>
+                           <p className="text-[9px] text-muted uppercase font-bold truncate leading-tight">{photo.author}</p>
+                         </div>
+                         <div className="text-right">
+                           <p className="text-xl font-light text-accent leading-none">{count}</p>
+                           <p className="text-[8px] text-muted font-bold uppercase leading-none mt-1">{lang === "sk" ? "hlasov" : "votes"}</p>
+                         </div>
+                       </div>
+                     );
+                   })}
+              </div>
             </div>
             
             <div className="bg-paper border border-border p-10 flex flex-col items-center justify-center space-y-6">

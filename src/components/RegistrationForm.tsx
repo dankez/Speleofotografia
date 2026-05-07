@@ -1,4 +1,4 @@
-import { useState, useRef, ChangeEvent, useMemo } from "react";
+import { useState, useRef, ChangeEvent, useMemo, useEffect } from "react";
 import { Upload, X, Check, Loader2, Plus, Info, AlertTriangle, Instagram, Mail, MapPin, User, FileText, Trophy, Globe, CheckCircle2 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/src/lib/utils";
@@ -18,6 +18,23 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
     webpage: "",
     address: "",
   });
+
+  // Auto-save draft logic
+  useEffect(() => {
+    const saved = localStorage.getItem("speleo_registration_draft");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        setFormData(prev => ({ ...prev, ...parsed }));
+      } catch (e) {
+        console.error("Draft load error", e);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("speleo_registration_draft", JSON.stringify(formData));
+  }, [formData]);
 
   const isValid = useMemo(() => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -210,6 +227,7 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
       const result = await res.json();
       if (result.success) {
         setSuccess(true);
+        localStorage.removeItem("speleo_registration_draft");
       } else {
         setError(result.error || "Chyba pri odosielaní / Error during submission");
       }

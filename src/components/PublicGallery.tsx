@@ -17,6 +17,7 @@ export default function PublicGallery({ lang }: { lang: Lang }) {
   const [loading, setLoading] = useState(true);
   const [votedIds, setVotedIds] = useState<string[]>([]);
   const [selectedPhoto, setSelectedPhoto] = useState<PublicPhoto | null>(null);
+  const [filter, setFilter] = useState<"all" | "A" | "B">("all");
 
   useEffect(() => {
     // Load voted IDs from local storage for privacy
@@ -84,10 +85,30 @@ export default function PublicGallery({ lang }: { lang: Lang }) {
             ? "Hlasujte za fotografie, ktoré vás najviac oslovili. Autori sú anonymizovaní." 
             : "Vote for the photos that inspired you the most. Authors remain anonymous."}
         </p>
+
+        {/* Category Filter */}
+        <div className="flex justify-center gap-2 pt-4">
+          {["all", "A", "B"].map((cat) => (
+            <button
+              key={cat}
+              onClick={() => setFilter(cat as any)}
+              className={cn(
+                "px-4 py-1 text-[9px] uppercase font-bold tracking-widest transition-all border",
+                filter === cat 
+                  ? "bg-ink text-white border-ink" 
+                  : "bg-transparent text-muted border-border hover:border-ink"
+              )}
+            >
+              {cat === "all" ? (lang === "sk" ? "Všetky" : "All") : cat}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="columns-1 sm:columns-2 lg:columns-3 xl:columns-4 gap-3 md:gap-4 space-y-3 md:space-y-4 px-3 md:px-4 max-w-[1800px] mx-auto">
-        {photos.map((photo) => (
+        {photos
+          .filter(p => filter === "all" || p.category === filter)
+          .map((photo) => (
           <motion.div
             layout
             key={photo.id}
