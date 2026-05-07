@@ -1,0 +1,17 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink: #111111;
+  --color-paper: #FDFDFD;
+  --color-border: #E8E8E8;
+  --color-accent: #2D5A27;
+  --color-muted: #717171;
+  
+  --font-sans: "Helvetica Neue", Arial, sans-serif;
+}
+
+@layer base {
+  body {
+    @apply bg-paper text-ink selection:bg-ink selection:text-paper;
+  }
+}
