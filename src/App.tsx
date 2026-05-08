@@ -21,8 +21,7 @@ export interface Settings {
   contestName: string;
   museumName: string;
   edition: string;
-  catA: string;
-  catB: string;
+  categories: { id: string, name: string }[];
   rulesSk: string;
   rulesEn: string;
   maxPhotosPerCategory: string;

@@ -190,10 +190,15 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
       return;
     }
 
-    const catA = photos.filter(p => p.category === "A").length;
-    const catB = photos.filter(p => p.category === "B").length;
+    const catCounts: Record<string, number> = {};
+    photos.forEach(p => {
+      catCounts[p.category] = (catCounts[p.category] || 0) + 1;
+    });
+
     const maxPhotos = parseInt(settings?.maxPhotosPerCategory || "5");
-    if (catA > maxPhotos || catB > maxPhotos) {
+    const overLimit = Object.values(catCounts).some(count => count > maxPhotos);
+
+    if (overLimit) {
       setError(t.errorLimit);
       return;
     }
@@ -405,13 +410,16 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
           <div className="space-y-6 flex-1 flex flex-col">
             <div className="flex items-center justify-between border-b border-border pb-2">
               <h3 className="text-[11px] font-bold uppercase tracking-[2px] text-muted">{t.photosTitle}</h3>
-              <div className="flex gap-4">
-                <span className={cn("text-[10px] font-bold uppercase tracking-widest", photos.filter(p => p.category === "A").length > parseInt(settings?.maxPhotosPerCategory || "5") ? "text-red-500" : "text-muted")}>
-                  {settings?.catA.split(" / ")[0] || t.catA}: {photos.filter(p => p.category === "A").length}/{settings?.maxPhotosPerCategory || 5}
-                </span>
-                <span className={cn("text-[10px] font-bold uppercase tracking-widest", photos.filter(p => p.category === "B").length > parseInt(settings?.maxPhotosPerCategory || "5") ? "text-red-500" : "text-muted")}>
-                  {settings?.catB.split(" / ")[0] || t.catB}: {photos.filter(p => p.category === "B").length}/{settings?.maxPhotosPerCategory || 5}
-                </span>
+              <div className="flex flex-wrap justify-end gap-x-4 gap-y-1">
+                {(settings?.categories || []).map(cat => {
+                  const count = photos.filter(p => p.category === cat.id).length;
+                  const max = parseInt(settings?.maxPhotosPerCategory || "5");
+                  return (
+                    <span key={cat.id} className={cn("text-[8px] font-bold uppercase tracking-widest", count > max ? "text-red-500" : "text-muted")}>
+                      {cat.name?.split(" / ")[0] || cat.id}: {count}/{max}
+                    </span>
+                  );
+                })}
               </div>
             </div>
 
@@ -497,11 +505,12 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
                       <div className="col-span-4 flex flex-col gap-2">
                         <select 
                           value={photo.category}
-                          onChange={e => updatePhotoInfo(idx, { category: e.target.value as "A" | "B" })}
+                          onChange={e => updatePhotoInfo(idx, { category: e.target.value })}
                           className="w-full border border-border p-2 text-xs font-bold uppercase outline-none bg-white"
                         >
-                          <option value="A">{settings?.catA.split(" / ")[0] || t.catA}</option>
-                          <option value="B">{settings?.catB.split(" / ")[0] || t.catB}</option>
+                          {(settings?.categories || []).map(cat => (
+                            <option key={cat.id} value={cat.id}>{cat.name?.split(" / ")[0] || cat.id}</option>
+                          ))}
                         </select>
                       </div>
                     </div>

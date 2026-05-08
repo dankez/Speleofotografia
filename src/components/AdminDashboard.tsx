@@ -9,8 +9,7 @@ interface ContestSettings {
   contestName: string;
   museumName: string;
   edition: string;
-  catA: string;
-  catB: string;
+  categories: { id: string, name: string }[];
   rulesSk: string;
   rulesEn: string;
   maxPhotosPerCategory: string;
@@ -29,7 +28,7 @@ interface ContestSettings {
 export default function AdminDashboard({ lang }: { lang: Lang }) {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [evaluators, setEvaluators] = useState<Evaluator[]>([]);
-  const [stats, setStats] = useState({ total: 0, catA: 0, catB: 0, uniqueEmails: 0 });
+  const [stats, setStats] = useState<any>({ total: 0, uniqueEmails: 0 });
   const [newEvalName, setNewEvalName] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"stats" | "photos" | "evaluators" | "settings">("stats");
@@ -37,8 +36,7 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
     contestName: "",
     museumName: "",
     edition: "",
-    catA: "",
-    catB: "",
+    categories: [],
     rulesSk: "",
     rulesEn: "",
     maxPhotosPerCategory: "5",
@@ -422,23 +420,66 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                     className="w-full p-3 border border-border bg-white text-sm outline-none focus:border-ink"
                   />
                 </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase text-muted">Category A Name</label>
-                  <input 
-                    type="text" 
-                    value={settings.catA}
-                    onChange={e => setSettings({ ...settings, catA: e.target.value })}
-                    className="w-full p-3 border border-border bg-white text-sm outline-none focus:border-ink"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase text-muted">Category B Name</label>
-                  <input 
-                    type="text" 
-                    value={settings.catB}
-                    onChange={e => setSettings({ ...settings, catB: e.target.value })}
-                    className="w-full p-3 border border-border bg-white text-sm outline-none focus:border-ink"
-                  />
+                <div className="md:col-span-2 space-y-4">
+                  <div className="flex items-center justify-between border-b border-border pb-2">
+                    <label className="text-[10px] font-bold uppercase text-muted">{lang === "sk" ? "Kategórie" : "Categories"}</label>
+                    <button 
+                      onClick={() => {
+                        const categories = settings?.categories || [];
+                        const newId = String.fromCharCode(65 + categories.length); // A, B, C...
+                        setSettings({
+                          ...settings,
+                          categories: [...categories, { id: newId, name: `New Category ${newId}` }]
+                        });
+                      }}
+                      className="text-[9px] font-bold uppercase text-accent flex items-center gap-1 hover:underline"
+                    >
+                      <Plus size={10} /> {lang === "sk" ? "Pridať kategóriu" : "Add Category"}
+                    </button>
+                  </div>
+                  <div className="space-y-3">
+                    {(settings?.categories || []).map((cat, idx) => (
+                      <div key={cat.id} className="flex gap-4 items-end">
+                        <div className="w-12">
+                          <label className="text-[8px] font-bold uppercase text-muted block mb-1">ID</label>
+                          <input 
+                            type="text" 
+                            value={cat.id}
+                            disabled
+                            className="w-full p-2 border border-border bg-paper text-xs text-center opacity-50"
+                          />
+                        </div>
+                        <div className="flex-1">
+                          <label className="text-[8px] font-bold uppercase text-muted block mb-1">Name</label>
+                          <input 
+                            type="text" 
+                            value={cat.name}
+                            onChange={e => {
+                              const categories = settings?.categories || [];
+                              const newCats = [...categories];
+                              newCats[idx].name = e.target.value;
+                              setSettings({ ...settings, categories: newCats });
+                            }}
+                            className="w-full p-2 border border-border bg-white text-xs outline-none focus:border-ink"
+                          />
+                        </div>
+                        {(settings?.categories || []).length > 1 && (
+                          <button 
+                            onClick={() => {
+                              const categories = settings?.categories || [];
+                              setSettings({
+                                ...settings,
+                                categories: categories.filter((_, i) => i !== idx)
+                              });
+                            }}
+                            className="p-2.5 text-muted hover:text-red-500 transition-colors"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold uppercase text-muted">Rules (SK)</label>
@@ -597,7 +638,7 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                     {lang === "sk" ? "Aktívni administrátori" : "Active Administrators"}
                   </p>
                   <div className="divide-y divide-border border border-border bg-white">
-                    {adminList.map(adm => (
+                    {(adminList || []).map(adm => (
                       <div key={adm.email} className="flex items-center justify-between p-4">
                         <div className="flex items-center gap-3">
                           <div className="w-8 h-8 rounded-full bg-paper flex items-center justify-center text-muted">
@@ -642,8 +683,13 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               <StatCard label={lang === "sk" ? "Fotografie celkom" : "Total Photos"} value={stats.total} />
               <StatCard label={lang === "sk" ? "Počet autorov" : "Total Authors"} value={stats.uniqueEmails} />
-              <StatCard label={lang === "sk" ? "Kategória A" : "Category A"} value={stats.catA} />
-              <StatCard label={lang === "sk" ? "Kategória B" : "Category B"} value={stats.catB} />
+              {(settings?.categories || []).map(cat => (
+                <StatCard 
+                  key={cat.id}
+                  label={cat.name?.split(" / ")[0] || cat.id} 
+                  value={stats[`cat${cat.id}`] || 0} 
+                />
+              ))}
             </div>
 
             {/* Public Choice Leaderboard */}

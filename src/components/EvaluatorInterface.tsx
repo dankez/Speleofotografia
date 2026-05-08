@@ -21,6 +21,7 @@ interface JuryPhoto {
 
 export default function EvaluatorInterface({ evalId, lang }: Props) {
   const [photos, setPhotos] = useState<JuryPhoto[]>([]);
+  const [settings, setSettings] = useState<any>(null);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [ratings, setRatings] = useState<Rating[]>([]);
@@ -31,7 +32,17 @@ export default function EvaluatorInterface({ evalId, lang }: Props) {
 
   useEffect(() => {
     fetchEvaluator();
+    fetchSettings();
   }, [evalId]);
+
+  const fetchSettings = async () => {
+    try {
+      const res = await fetch("/api/settings");
+      if (res.ok) setSettings(await res.json());
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   const fetchEvaluator = async () => {
     try {
@@ -134,18 +145,18 @@ export default function EvaluatorInterface({ evalId, lang }: Props) {
           <h2 className="text-5xl font-light tracking-tighter uppercase">{evaluatorName}</h2>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          {["A", "B"].map(cat => (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+          {(settings?.categories || []).map(cat => (
             <button
-              key={cat}
-              onClick={() => startEvaluation(cat)}
+              key={cat.id}
+              onClick={() => startEvaluation(cat.id)}
               className="group relative h-80 border border-border bg-white flex flex-col items-center justify-center space-y-6 overflow-hidden transition-all hover:border-ink"
             >
               <div className="absolute inset-0 bg-paper opacity-0 group-hover:opacity-40 transition-opacity" />
-              <div className="z-10 text-center">
-                <span className="text-[120px] font-black opacity-[0.03] absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 select-none">{cat}</span>
+              <div className="z-10 text-center px-6">
+                <span className="text-[120px] font-black opacity-[0.03] absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 select-none">{cat.id}</span>
                 <p className="text-[10px] font-bold uppercase tracking-widest text-muted">{lang === "sk" ? "Kategória" : "Category"}</p>
-                <h3 className="text-4xl font-light tracking-tight uppercase mt-2">{cat}</h3>
+                <h3 className="text-2xl md:text-3xl font-light tracking-tight uppercase mt-2">{cat.name?.split(" / ")[0] || cat.id}</h3>
               </div>
               <div className="z-10 opacity-0 group-hover:opacity-100 transition-opacity">
                 <div className="bg-ink text-white px-8 py-3 text-[10px] font-bold uppercase tracking-widest">
@@ -212,7 +223,7 @@ export default function EvaluatorInterface({ evalId, lang }: Props) {
                 <ChevronLeft size={20} />
              </button>
              <p className="text-[11px] text-muted uppercase font-bold tracking-widest">
-                {lang === "sk" ? "Porotca" : "Jury"}: {evaluatorName} — {lang === "sk" ? "Karta" : "Work"} {currentIndex + 1} {lang === "sk" ? "z" : "of"} {photos.length} — {lang === "sk" ? "Kategória" : "Category"} {selectedCategory}
+                {lang === "sk" ? "Porotca" : "Jury"}: {evaluatorName} — {lang === "sk" ? "Karta" : "Work"} {currentIndex + 1} {lang === "sk" ? "z" : "of"} {photos.length} — {(settings?.categories || []).find((c: any) => c.id === selectedCategory)?.name?.split(" / ")[0] || selectedCategory}
              </p>
           </div>
           <h2 className="text-3xl font-light tracking-tight uppercase">{lang === "sk" ? "Anonymné hodnotenie" : "Anonymous Scoring"}</h2>
@@ -291,7 +302,7 @@ export default function EvaluatorInterface({ evalId, lang }: Props) {
              <div className="space-y-8">
                 <div className="space-y-1">
                   <p className="text-3xl font-light tracking-tight uppercase leading-none">{currentPhoto?.name}</p>
-                  <p className="text-[10px] font-bold uppercase tracking-[2px] text-accent mt-2">{lang === "sk" ? "Kategória" : "Category"} {currentPhoto?.category}</p>
+                  <p className="text-[10px] font-bold uppercase tracking-[2px] text-accent mt-2">{(settings?.categories || []).find((c: any) => c.id === currentPhoto?.category)?.name?.split(" / ")[0] || currentPhoto?.category}</p>
                 </div>
 
                 {currentPhoto?.metadata && (

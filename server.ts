@@ -111,8 +111,10 @@ const DEFAULT_SETTINGS = {
   contestName: "Speleofotografia 2025",
   museumName: "Slovenské múzeum ochrany prírody a jaskyniarstva",
   edition: "23. ročník",
-  catA: "Krása jaskýň / Cave Beauty",
-  catB: "Speleomoment / Speleomoment",
+  categories: [
+    { id: "A", name: "Krása jaskýň / Cave Beauty" },
+    { id: "B", name: "Speleomoment / Speleomoment" }
+  ],
   rulesSk: "Maximálne 5 fotografií na kategóriu. Tlačová kvalita...",
   rulesEn: "Maximum 5 photos per category. Print quality...",
   maxPhotosPerCategory: "5",
@@ -144,8 +146,7 @@ app.get("/api/settings", (req, res) => {
     "contestName", 
     "museumName", 
     "edition", 
-    "catA", 
-    "catB", 
+    "categories",
     "rulesSk", 
     "rulesEn", 
     "maxPhotosPerCategory",
@@ -193,12 +194,16 @@ app.post("/api/admin/upload-logo", upload.single("logo"), (req, res) => {
 // Admin login
 app.post("/api/admin/login", (req, res) => {
     const { email, password } = req.body;
-    console.log(`Login attempt for: ${email}`);
+    console.log(`Login attempt for: "${email}"`);
+    if (!email || !password) {
+      console.log("Login failed: Missing email or password");
+      return res.status(401).json({ error: "Chýbajúce údaje / Missing credentials" });
+    }
     try {
       const admins = JSON.parse(fs.readFileSync(ADMINS_JSON, "utf8"));
       const admin = admins.find((a: any) => 
-        a.email.toLowerCase().trim() === email.toLowerCase().trim() && 
-        a.password.trim() === password.trim()
+        a.email && a.email.toLowerCase().trim() === email.toLowerCase().trim() && 
+        a.password && a.password.trim() === password.trim()
       );
       
       if (admin) {
@@ -404,15 +409,24 @@ app.post("/api/admin/login", (req, res) => {
   // Stats for progress/admin
   app.get("/api/stats", (req, res) => {
     try {
-      if (!fs.existsSync(REGISTRATIONS_CSV)) return res.json({ total: 0, catA: 0, catB: 0 });
+      const settings = JSON.parse(fs.readFileSync(SETTINGS_JSON, "utf8"));
+      if (!fs.existsSync(REGISTRATIONS_CSV)) {
+        const initialStats: any = { total: 0, uniqueEmails: 0 };
+        settings.categories.forEach((cat: any) => initialStats[`cat${cat.id}`] = 0);
+        return res.json(initialStats);
+      }
       const data = fs.readFileSync(REGISTRATIONS_CSV, "utf8");
       const lines = data.trim().split("\n").slice(1);
-      const stats = {
+      
+      const stats: any = {
         total: lines.length,
-        catA: lines.filter(l => l.includes(",A,")).length,
-        catB: lines.filter(l => l.includes(",B,")).length,
         uniqueEmails: new Set(lines.map(l => l.split(",")[2])).size
       };
+      
+      settings.categories.forEach((cat: any) => {
+        stats[`cat${cat.id}`] = lines.filter(l => l.split(",")[3] === cat.id).length;
+      });
+      
       res.json(stats);
     } catch (e) {
       res.status(500).json({ error: "Chyba pri čítaní štatistík" });

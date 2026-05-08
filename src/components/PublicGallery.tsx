@@ -14,10 +14,11 @@ interface PublicPhoto {
 
 export default function PublicGallery({ lang }: { lang: Lang }) {
   const [photos, setPhotos] = useState<PublicPhoto[]>([]);
+  const [settings, setSettings] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);
   const [votedIds, setVotedIds] = useState<string[]>([]);
   const [selectedPhoto, setSelectedPhoto] = useState<PublicPhoto | null>(null);
-  const [filter, setFilter] = useState<"all" | "A" | "B">("all");
+  const [filter, setFilter] = useState<string>("all");
 
   useEffect(() => {
     // Load voted IDs from local storage for privacy
@@ -31,7 +32,17 @@ export default function PublicGallery({ lang }: { lang: Lang }) {
     }
     
     fetchPhotos();
+    fetchSettings();
   }, []);
+
+  const fetchSettings = async () => {
+    try {
+      const res = await fetch("/api/settings");
+      if (res.ok) setSettings(await res.json());
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   const fetchPhotos = async () => {
     try {
@@ -87,19 +98,30 @@ export default function PublicGallery({ lang }: { lang: Lang }) {
         </p>
 
         {/* Category Filter */}
-        <div className="flex justify-center gap-2 pt-4">
-          {["all", "A", "B"].map((cat) => (
+        <div className="flex flex-wrap justify-center gap-2 pt-4">
+          <button
+            onClick={() => setFilter("all")}
+            className={cn(
+              "px-4 py-1 text-[9px] uppercase font-bold tracking-widest transition-all border",
+              filter === "all" 
+                ? "bg-ink text-white border-ink" 
+                : "bg-transparent text-muted border-border hover:border-ink"
+            )}
+          >
+            {lang === "sk" ? "Všetky" : "All"}
+          </button>
+          {(settings?.categories || []).map((cat) => (
             <button
-              key={cat}
-              onClick={() => setFilter(cat as any)}
+              key={cat.id}
+              onClick={() => setFilter(cat.id)}
               className={cn(
                 "px-4 py-1 text-[9px] uppercase font-bold tracking-widest transition-all border",
-                filter === cat 
+                filter === cat.id 
                   ? "bg-ink text-white border-ink" 
                   : "bg-transparent text-muted border-border hover:border-ink"
               )}
             >
-              {cat === "all" ? (lang === "sk" ? "Všetky" : "All") : cat}
+              {cat.name?.split(" / ")[0] || cat.id}
             </button>
           ))}
         </div>

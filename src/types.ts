@@ -1,6 +1,6 @@
 export interface PhotoInfo {
   name: string;
-  category: "A" | "B";
+  category: string;
   description: string;
   file?: File;
   previewUrl?: string;
