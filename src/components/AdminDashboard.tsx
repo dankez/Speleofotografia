@@ -1,17 +1,24 @@
 import { useState, useEffect, ChangeEvent } from "react";
-import { BarChart3, Users, Image as ImageIcon, Link as LinkIcon, Plus, Copy, Check, Download, Trash2, Eye, Shield, Settings, Mail, UserPlus, Heart } from "lucide-react";
+import { BarChart3, Users, Image as ImageIcon, Link as LinkIcon, Plus, Copy, Check, Download, Trash2, Eye, Shield, Settings as SettingsIcon, Mail, UserPlus, Heart, Code, ExternalLink } from "lucide-react";
 import { motion } from "motion/react";
 import { cn } from "@/src/lib/utils";
 import type { Photo, Evaluator } from "../types";
-import { Lang } from "../App";
+import { Lang, Settings } from "../App";
 
 interface ContestSettings {
   contestName: string;
   museumName: string;
   edition: string;
   categories: { id: string, name: string }[];
+  fieldRequirements: {
+    author: boolean;
+    email: boolean;
+    instagram: boolean;
+    address: boolean;
+  };
   rulesSk: string;
   rulesEn: string;
+  rulesText?: string;
   maxPhotosPerCategory: string;
   watermarkTemplate: string;
   logoUrl: string;
@@ -31,14 +38,58 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
   const [stats, setStats] = useState<any>({ total: 0, uniqueEmails: 0 });
   const [newEvalName, setNewEvalName] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"stats" | "photos" | "evaluators" | "settings">("stats");
+  const [copied, setCopied] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"stats" | "photos" | "evaluators" | "embed" | "settings">("stats");
   const [settings, setSettings] = useState<ContestSettings>({
     contestName: "",
     museumName: "",
     edition: "",
     categories: [],
+    fieldRequirements: {
+      author: true,
+      email: true,
+      instagram: false,
+      address: true
+    },
     rulesSk: "",
     rulesEn: "",
+    rulesText: `SPELEOFOTOGRAFIA 2026
+23. ročník medzinárodnej súťažnej výstavy fotografií s jaskyniarskou tematikou
+
+1. Organizátori
+Slovenská speleologická spoločnosť
+Štátna ochrana prírody SR – Správa slovenských jaskýň
+Slovenské múzeum ochrany prírody a jaskyniarstva
+Mesto Liptovský Mikuláš
+
+2. Podmienky účasti
+Súťaže sa môže zúčastniť každý fotograf, ktorý splní podmienky týchto propozícií.
+Účasť v súťaži je bezplatná.
+Každý autor môže do jednej kategórie zaslať najviac 5 fotografií.
+Členovia poroty a organizátori sú z účasti v súťaži vylúčení.
+
+3. Súťažné kategórie a ceny
+Kategória A: Fotografia s príbehom – snímky znázorňujúce kras, jaskyne a jaskyniarov doplnené textovým príbehom v rozsahu do 5 000 znakov.
+Kategória B: Speleomoment – reportážna fotografia z jaskyniarskych akcií a expedícií.
+
+Ocenenia:
+V každej kategórii budú ocenené 3 najlepšie práce.
+Hlavná cena Speleofotografie 2026: Absolútny víťaz 23. ročníka vybraný odbornou porotou.
+Cena verejnosti: Na základe hlasovania na sociálnych sieťach.
+
+4. Technické parametre a spôsob prihlásenia
+Súťaž prebieha plne digitálne cez online formulár. Zasielanie prác e-mailom nie je akceptované.
+Technické požiadavky: Minimálne 3 000 px na dlhšej strane, formát .jpg, maximálna veľkosť súboru 5 MB.
+Jazyk: Názvy fotografií a sprievodné informácie musia byť v anglickom jazyku. Príbeh ku kategórii A môže byť v slovenskom alebo anglickom jazyku.
+
+5. Právne ustanovenia (Autorské práva a GDPR)
+Autorské práva: Účastník odoslaním formulára potvrdzuje, že je autorom diel. Autor udeľuje organizátorom súhlas na bezodplatné použitie fotografií na propagáciu súťaže.
+GDPR: Osobné údaje sú spracúvané výhradne za účelom realizácie súťaže v zmysle Nariadenia (EÚ) 2016/679.
+
+6. Harmonogram a porota
+Uzávierka prihlášok: 15. september 2026.
+Zloženie poroty: Pavol Kočiš (SK – predseda), Marek Audy (CZ), Cosmin Berghean (RO), Daniel Lee (RU), Pavol Staník (SK), Lukáš Kubičina (SK).
+Vyhlásenie výsledkov: November 2026, SMOPaJ Liptovský Mikuláš.`,
     maxPhotosPerCategory: "5",
     watermarkTemplate: "",
     logoUrl: "",
@@ -362,12 +413,13 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
         </div>
 
         <div className="flex gap-4">
-          {[
-            { id: "stats", label: lang === "sk" ? "Štatistiky" : "Stats", icon: BarChart3 },
-            { id: "photos", label: lang === "sk" ? "Galéria" : "Gallery", icon: ImageIcon },
-            { id: "evaluators", label: lang === "sk" ? "Porota" : "Jury", icon: Users },
-            { id: "settings", label: lang === "sk" ? "Nastavenia" : "Settings", icon: Settings },
-          ].map(tab => (
+            {[
+              { id: "stats", label: lang === "sk" ? "Štatistiky" : "Stats", icon: BarChart3 },
+              { id: "photos", label: lang === "sk" ? "Galéria" : "Gallery", icon: ImageIcon },
+              { id: "evaluators", label: lang === "sk" ? "Porota" : "Jury", icon: Users },
+              { id: "embed", label: lang === "sk" ? "Prepojenie" : "Embed", icon: Code },
+              { id: "settings", label: lang === "sk" ? "Nastavenia" : "Settings", icon: SettingsIcon },
+            ].map(tab => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
@@ -426,7 +478,10 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                     <button 
                       onClick={() => {
                         const categories = settings?.categories || [];
-                        const newId = String.fromCharCode(65 + categories.length); // A, B, C...
+                        const nextLetter = String.fromCharCode(65 + categories.length);
+                        const newId = categories.some(c => c.id === nextLetter) 
+                          ? Math.random().toString(36).substring(2, 5).toUpperCase()
+                          : nextLetter;
                         setSettings({
                           ...settings,
                           categories: [...categories, { id: newId, name: `New Category ${newId}` }]
@@ -478,6 +533,33 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                           </button>
                         )}
                       </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="md:col-span-2 space-y-4 pt-4 border-t border-border">
+                  <label className="text-[10px] font-bold uppercase text-muted">{lang === "sk" ? "Požiadavky na polia" : "Field Requirements"}</label>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {Object.entries(settings.fieldRequirements || {}).map(([field, required]) => (
+                      <button 
+                        key={field}
+                        onClick={() => {
+                          setSettings({
+                            ...settings,
+                            fieldRequirements: {
+                              ...settings.fieldRequirements,
+                              [field]: !required
+                            }
+                          });
+                        }}
+                        className={cn(
+                          "p-3 border text-[10px] font-bold uppercase tracking-widest transition-all",
+                          required 
+                            ? "border-ink bg-ink text-white" 
+                            : "border-border bg-white text-muted hover:border-ink hover:text-ink"
+                        )}
+                      >
+                        {field}: {required ? (lang === "sk" ? "Povinné" : "Required") : (lang === "sk" ? "Dobrovoľné" : "Voluntary")}
+                      </button>
                     ))}
                   </div>
                 </div>
@@ -604,6 +686,22 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
               </div>
 
               <h3 className="text-[11px] font-bold uppercase tracking-[2px] text-muted border-b border-border pb-2 pt-10">
+                {lang === "sk" ? "Podmienky súťaže" : "Competition Rules"}
+              </h3>
+              <div className="space-y-2">
+                <p className="text-[11px] text-muted uppercase tracking-tight mb-2">
+                  {lang === "sk" 
+                    ? "Tento text sa zobrazí v modálnom okne po kliknutí na odkaz v prihláške. Podporuje Markdown formátovanie." 
+                    : "This text will be displayed in a modal window when the link in the application is clicked. Supports Markdown formatting."}
+                </p>
+                <textarea 
+                  value={settings.rulesText}
+                  onChange={e => setSettings({ ...settings, rulesText: e.target.value })}
+                  className="w-full p-4 border border-border bg-white text-[12px] font-mono outline-none focus:border-ink h-96 leading-relaxed"
+                />
+              </div>
+
+              <h3 className="text-[11px] font-bold uppercase tracking-[2px] text-muted border-b border-border pb-2 pt-10">
                 {lang === "sk" ? "Správa administrátorov" : "Admin Management"}
               </h3>
 
@@ -684,11 +782,12 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
               <StatCard label={lang === "sk" ? "Fotografie celkom" : "Total Photos"} value={stats.total} />
               <StatCard label={lang === "sk" ? "Počet autorov" : "Total Authors"} value={stats.uniqueEmails} />
               {(settings?.categories || []).map(cat => (
-                <StatCard 
-                  key={cat.id}
-                  label={cat.name?.split(" / ")[0] || cat.id} 
-                  value={stats[`cat${cat.id}`] || 0} 
-                />
+                <div key={cat.id}>
+                  <StatCard 
+                    label={cat.name?.split(" / ")?.[0] || cat.id} 
+                    value={stats[`cat${cat.id}`] || 0} 
+                  />
+                </div>
               ))}
             </div>
 
@@ -702,13 +801,13 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                   </h3>
                 </div>
                 <span className="text-[10px] font-bold text-muted uppercase tracking-widest">
-                  {Object.values(publicResults).reduce((a, b) => a + b, 0)} {lang === "sk" ? "hlasov celkom" : "total votes"}
+                  {(Object.values(publicResults) as number[]).reduce((a: number, b: number) => a + b, 0)} {lang === "sk" ? "hlasov celkom" : "total votes"}
                 </span>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                  {Object.entries(publicResults)
-                   .sort(([, a], [, b]) => b - a)
+                   .sort(([, a], [, b]) => (b as number) - (a as number))
                    .slice(0, 6)
                    .map(([id, count]) => {
                      const photo = photos.find(p => p.id === id);
@@ -768,6 +867,155 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                   <code>[speleo_stats authors="..." photos_a="{stats.catA}" photos_b="{stats.catB}"]</code>
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "embed" && (
+          <div className="space-y-8 max-w-4xl">
+            <div className="space-y-2">
+              <h3 className="text-[11px] font-bold uppercase tracking-[2px] text-muted border-b border-border pb-2">
+                {lang === "sk" ? "VLOŽENIE GALÉRIE NA VÁŠ WEB" : "EMBED GALLERY ON YOUR SITE"}
+              </h3>
+              <p className="text-[12px] text-muted leading-relaxed">
+                {lang === "sk" 
+                  ? "Tento kód skopírujte a vložte do vašej webstránky na miesto, kde chcete zobraziť galériu. Galéria sa automaticky prispôsobí veľkosti kontajnera. Toto je najbezpečnejší a najjednoduchší spôsob integrácie."
+                  : "Copy this code and paste it into your website where you want the gallery to appear. The gallery will automatically adapt to the container size. This is the safest and easiest way to integrate."
+                }
+              </p>
+            </div>
+
+            <div className="bg-paper border border-border p-6 space-y-6">
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-accent">IFrame Embed Code</span>
+                  <button 
+                    onClick={() => {
+                      const baseUrl = window.location.origin;
+                      const embedCode = `<iframe \n  src="${baseUrl}?view=public" \n  width="100%" \n  height="800px" \n  frameborder="0" \n  loading="lazy" \n  referrerpolicy="no-referrer-when-downgrade"\n  style="border:none; overflow:hidden; min-height:600px;"\n></iframe>`;
+                      navigator.clipboard.writeText(embedCode);
+                      setCopied("embed");
+                      setTimeout(() => setCopied(null), 2000);
+                    }}
+                    className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-ink hover:text-accent transition-colors"
+                  >
+                    {copied === "embed" ? <Check size={14} /> : <Copy size={14} />}
+                    {copied === "embed" ? (lang === "sk" ? "Skopírované" : "Copied") : (lang === "sk" ? "Kopírovať kód" : "Copy Code")}
+                  </button>
+                </div>
+                <pre className="bg-white border border-border p-4 text-[11px] font-mono overflow-x-auto text-muted whitespace-pre-wrap leading-relaxed">
+{`<iframe
+  src="${window.location.origin}?view=public"
+  width="100%"
+  height="800px"
+  frameborder="0"
+  loading="lazy"
+  referrerpolicy="no-referrer-when-downgrade"
+  style="border:none; min-height:600px;"
+></iframe>`}
+                </pre>
+              </div>
+
+              <div className="pt-4 border-t border-border flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Shield size={14} className="text-accent" />
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-muted">Secure & Sandbox friendly</span>
+                </div>
+                <a 
+                  href={`${window.location.origin}?view=public`} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-accent hover:underline"
+                >
+                  View Gallery <ExternalLink size={12} />
+                </a>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="p-4 border border-border bg-white space-y-2">
+                <h4 className="text-[10px] font-bold uppercase tracking-widest text-ink">Lazy Loading</h4>
+                <p className="text-[11px] text-muted leading-tight">
+                  {lang === "sk" 
+                    ? "Galéria sa načíta až keď k nej návštevník príde, čo šetrí rýchlosť vášho webu." 
+                    : "The gallery loads only when the visitor scrolls to it, optimizing your site performance."}
+                </p>
+              </div>
+              <div className="p-4 border border-border bg-white space-y-2">
+                <h4 className="text-[10px] font-bold uppercase tracking-widest text-ink">Responsive</h4>
+                <p className="text-[11px] text-muted leading-tight">
+                  {lang === "sk" 
+                    ? "Iframe je nastavený na 100% šírku, aby fungoval bezchybne na mobiloch aj počítačoch." 
+                    : "The iframe is set to 100% width to work flawlessly on both mobile and desktop devices."}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-4 pt-8 border-t border-border">
+              <div className="space-y-2">
+                <h3 className="text-[11px] font-bold uppercase tracking-[2px] text-muted border-b border-border pb-2">
+                  {lang === "sk" ? "VLOŽENIE PRIHLÁŠKY NA VÁŠ WEB" : "EMBED REGISTRATION FORM ON YOUR SITE"}
+                </h3>
+                <p className="text-[12px] text-muted leading-relaxed">
+                  {lang === "sk" 
+                    ? "Tento kód skopírujte a vložte pre zobrazenie registračného formulára. Ideálne pre podstránku 'Súťaž' alebo 'Registrácia'."
+                    : "Copy this code to display the registration form. Ideal for a 'Competition' or 'Registration' subpage."
+                  }
+                </p>
+              </div>
+
+              <div className="bg-paper border border-border p-6 space-y-6">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-accent">Registration IFrame Code</span>
+                    <button 
+                      onClick={() => {
+                        const baseUrl = window.location.origin;
+                        const embedCode = `<iframe \n  src="${baseUrl}" \n  width="100%" \n  height="1200px" \n  frameborder="0" \n  loading="lazy" \n  referrerpolicy="no-referrer-when-downgrade"\n  style="border:none; overflow:hidden; min-height:800px;"\n></iframe>`;
+                        navigator.clipboard.writeText(embedCode);
+                        setCopied("form-embed");
+                        setTimeout(() => setCopied(null), 2000);
+                      }}
+                      className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-ink hover:text-accent transition-colors"
+                    >
+                      {copied === "form-embed" ? <Check size={14} /> : <Copy size={14} />}
+                      {copied === "form-embed" ? (lang === "sk" ? "Skopírované" : "Copied") : (lang === "sk" ? "Kopírovať kód" : "Copy Code")}
+                    </button>
+                  </div>
+                  <pre className="bg-white border border-border p-4 text-[11px] font-mono overflow-x-auto text-muted whitespace-pre-wrap leading-relaxed">
+{`<iframe
+  src="${window.location.origin}"
+  width="100%"
+  height="1200px"
+  frameborder="0"
+  loading="lazy"
+  referrerpolicy="no-referrer-when-downgrade"
+  style="border:none; min-height:800px;"
+></iframe>`}
+                  </pre>
+                </div>
+              </div>
+            </div>
+            
+            <div className="p-8 border border-border bg-white space-y-4">
+              <label className="text-[11px] font-bold uppercase tracking-widest text-muted">
+                {lang === "sk" ? "WordPress integrácia (Legacy Shortcodes)" : "WordPress Integration (Legacy Shortcodes)"}
+              </label>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="p-4 bg-paper font-mono text-[10px] space-y-1">
+                  <p className="text-accent font-bold"># Gallery Shortcode</p>
+                  <code>[speleo_gallery category="all" year="2025" count="{stats.total}"]</code>
+                </div>
+                <div className="p-4 bg-paper font-mono text-[10px] space-y-1">
+                  <p className="text-accent font-bold"># Stats Shortcode</p>
+                  <code>[speleo_stats authors="..." photos_a="{stats.catA}" photos_b="{stats.catB}"]</code>
+                </div>
+              </div>
+              <p className="text-[9px] text-muted uppercase font-bold tracking-widest italic">
+                {lang === "sk" 
+                  ? "* Pre nové inštalácie odporúčame použiť IFrame kód vyššie." 
+                  : "* For new installations, we recommend using the IFrame code above."}
+              </p>
             </div>
           </div>
         )}

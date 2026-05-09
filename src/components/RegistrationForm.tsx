@@ -1,14 +1,16 @@
-import { useState, useRef, ChangeEvent, useMemo, useEffect } from "react";
-import { Upload, X, Check, Loader2, Plus, Info, AlertTriangle, Instagram, Mail, MapPin, User, FileText, Trophy, Globe, CheckCircle2 } from "lucide-react";
+import { useState, useRef, ChangeEvent, useMemo, useEffect, DragEvent } from "react";
+import { Upload, X, Check, Loader2, Plus, Info, AlertTriangle, Instagram, Mail, MapPin, User, FileText, Trophy, Globe, CheckCircle2, FlaskConical } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import ReactMarkdown from "react-markdown";
 import { cn } from "@/src/lib/utils";
 import type { PhotoInfo, Registration } from "../types";
 import { Lang, Settings } from "../App";
-import { FlaskConical } from "lucide-react";
 
 export default function RegistrationForm({ lang, settings }: { lang: Lang, settings: Settings | null }) {
   const [loading, setLoading] = useState(false);
+  const [showRules, setShowRules] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [success, setSuccess] = useState(false);
   
   const [formData, setFormData] = useState<Omit<Registration, "photos">>({
@@ -17,6 +19,8 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
     instagram: "",
     webpage: "",
     address: "",
+    gdprConsent: false,
+    rulesConsent: false,
   });
 
   // Auto-save draft logic
@@ -39,15 +43,18 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
   const isValid = useMemo(() => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const urlRegex = /^(https?:\/\/)?([\da-z.-]+)\.([a-z.]{2,6})([/\w .-]*)*\/?$/;
+    const req = settings?.fieldRequirements;
     
     return {
-      author: formData.author.length > 2,
-      email: emailRegex.test(formData.email),
-      instagram: formData.instagram.length > 1 && formData.instagram.startsWith("@"),
+      author: !req?.author || formData.author.length > 2,
+      email: !req?.email || emailRegex.test(formData.email),
+      instagram: !req?.instagram || (formData.instagram.length > 1 && formData.instagram.startsWith("@")),
       webpage: !formData.webpage || urlRegex.test(formData.webpage),
-      address: formData.address.length > 5,
+      address: !req?.address || formData.address.length > 5,
+      gdpr: formData.gdprConsent,
+      rules: formData.rulesConsent,
     };
-  }, [formData]);
+  }, [formData, settings]);
 
   const [photos, setPhotos] = useState<PhotoInfo[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -88,6 +95,7 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
       webpage: "Author Webpage (optional)",
       consentTitle: "Data Processing Consent",
       consentText: "I agree with the publication of photos and the processing of personal data for the needs of the competition (GDPR). Consent is valid for 5 years.",
+      rulesConsentText: "I agree with the competition rules and confirm that I am the author of the submitted works.",
       photosTitle: "02 Works / Photos",
       uploadTitle: "Photo Upload",
       uploadNote: "Min. 300 dpi, min. 1200px short side, max. 12MB. Name according to category.",
@@ -103,14 +111,15 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
       newForm: "New Application",
       errorEmpty: "Please fill in all required fields and upload at least one photo.",
       errorLimit: `You can submit a maximum of ${settings?.maxPhotosPerCategory || 5} photos per category.`,
+      errorConsent: "You must agree to GDPR and competition rules.",
     }
   }[lang];
 
-  const handleFiles = (files: File[]) => {
+  const handleFiles = (files: File[], category?: string) => {
     const newPhotos: PhotoInfo[] = files.map(f => {
       return {
         name: f.name.split(".")[0],
-        category: "A",
+        category: category || (settings?.categories?.[0]?.id || "A"),
         description: "",
         file: f,
         previewUrl: URL.createObjectURL(f)
@@ -121,13 +130,13 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const handleFileSelect = (e: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
+  const handleFileSelect = (e: ChangeEvent<HTMLInputElement>, category?: string) => {
+    const files = Array.from(e.target.files || []) as File[];
     if (files.length === 0) return;
-    handleFiles(files);
+    handleFiles(files, category);
   };
 
-  const onDragOver = (e: React.DragEvent) => {
+  const onDragOver = (e: DragEvent) => {
     e.preventDefault();
     setIsDragging(true);
   };
@@ -136,10 +145,10 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
     setIsDragging(false);
   };
 
-  const onDrop = (e: React.DragEvent) => {
+  const onDrop = (e: DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    const files = Array.from(e.dataTransfer.files);
+    const files = Array.from(e.dataTransfer.files as FileList);
     if (files.length > 0) {
       handleFiles(files);
     }
@@ -176,18 +185,26 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
       webpage: "https://michaldanko.sk",
       address: "Demänovská dolina 10, Liptovský Mikuláš",
       instagram: "@michal.danko",
+      gdprConsent: true,
+      rulesConsent: true,
     });
   };
 
   const handleSubmit = async () => {
-    if (!formData.author || !formData.email || !formData.address) {
-      setError(t.errorEmpty);
-      return;
+    const errors: string[] = [];
+    const req = settings?.fieldRequirements;
+
+    if (req?.author && formData.author.length < 3) errors.push(lang === "sk" ? "Meno autora je príliš krátke alebo chýba" : "Author name is too short or missing");
+    if (req?.email && !isValid.email) errors.push(lang === "sk" ? "Neplatný email" : "Invalid email");
+    if (req?.address && formData.address.length < 5) errors.push(lang === "sk" ? "Adresa je príliš krátka" : "Address is too short");
+    if (req?.instagram && !isValid.instagram) errors.push(lang === "sk" ? "Instagram by mal začínať @ a byť dlhší" : "Instagram should start with @ and be longer");
+    
+    if (!formData.gdprConsent || !formData.rulesConsent) {
+      errors.push(lang === "sk" ? "Je potrebné odsúhlasiť GDPR a pravidlá súťaže." : "You must agree to GDPR and competition rules.");
     }
 
     if (photos.length === 0) {
-      setError(lang === "sk" ? "Prosím nahrajte aspoň jednu fotografiu." : "Please upload at least one photo.");
-      return;
+      errors.push(lang === "sk" ? "Nahrajte aspoň jednu fotografiu" : "Upload at least one photo");
     }
 
     const catCounts: Record<string, number> = {};
@@ -196,14 +213,19 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
     });
 
     const maxPhotos = parseInt(settings?.maxPhotosPerCategory || "5");
-    const overLimit = Object.values(catCounts).some(count => count > maxPhotos);
+    (settings?.categories || []).forEach(cat => {
+      if ((catCounts[cat.id] || 0) > maxPhotos) {
+        errors.push(`${lang === "sk" ? "Limit prekročený v kategorii" : "Limit exceeded in category"} ${cat.name || cat.id} (${catCounts[cat.id]}/${maxPhotos})`);
+      }
+    });
 
-    if (overLimit) {
-      setError(t.errorLimit);
+    if (errors.length > 0) {
+      setValidationErrors(errors);
       return;
     }
 
     setLoading(true);
+    setValidationErrors([]);
     setError(null);
 
     const data = new FormData();
@@ -212,9 +234,11 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
     data.append("instagram", formData.instagram);
     data.append("webpage", formData.webpage || "");
     data.append("address", formData.address);
+    data.append("gdprConsent", String(formData.gdprConsent));
+    data.append("rulesConsent", String(formData.rulesConsent));
     
     const photoInfos = photos.map(p => ({
-      name: p.name,
+      name: p.name || p.file?.name.split(".")[0] || "Untitled",
       category: p.category,
       description: p.description
     }));
@@ -263,8 +287,48 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
     );
   }
 
+  const req = settings?.fieldRequirements;
+
   return (
     <div className="space-y-12">
+      {/* Detailed Error Modal */}
+      <AnimatePresence>
+        {validationErrors.length > 0 && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-ink/40 backdrop-blur-sm"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white border-2 border-red-500 p-8 max-w-md w-full space-y-6"
+            >
+              <div className="flex items-center gap-3 text-red-500 pb-2 border-b border-border">
+                <AlertTriangle size={24} />
+                <h3 className="text-sm font-bold uppercase tracking-widest">{lang === "sk" ? "Chyby v prihláške" : "Application Errors"}</h3>
+              </div>
+              <ul className="space-y-3">
+                {validationErrors.map((err, i) => (
+                  <li key={i} className="flex items-start gap-2 text-xs text-muted">
+                    <div className="w-1 h-1 rounded-full bg-red-500 mt-1.5 shrink-0" />
+                    {err}
+                  </li>
+                ))}
+              </ul>
+              <button 
+                onClick={() => setValidationErrors([])}
+                className="w-full py-3 bg-paper border border-border text-[10px] font-bold uppercase tracking-widest hover:border-ink transition-all"
+              >
+                {lang === "sk" ? "Rozumiem" : "I Understand"}
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Introduction */}
       <div className="flex flex-col md:flex-row justify-between items-start gap-4">
         <div className="space-y-2">
@@ -282,258 +346,315 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
         </button>
       </div>
 
-      {settings && (
-        <div className="p-6 border border-border bg-white text-[12px] leading-relaxed text-muted whitespace-pre-wrap">
-          <div className="flex gap-2 items-center mb-2 text-ink font-bold uppercase tracking-widest text-[10px]">
-            <Info size={14} />
-            {lang === "sk" ? "Podmienky súťaže / Rules" : "Competition Rules"}
-          </div>
-          {lang === "sk" ? settings.rulesSk : settings.rulesEn}
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-        {/* Left Column: Author Info */}
-        <div className="space-y-8">
-          <div className="space-y-6">
-            <h3 className="text-[11px] font-bold uppercase tracking-[2px] text-muted border-b border-border pb-2">{t.personalInfo}</h3>
-            
-            <div className="space-y-6">
-              <div className="space-y-2 relative">
-                <label className="text-[11px] uppercase font-bold text-muted">{t.fullName}</label>
-                <div className="relative">
-                  <input 
-                    type="text" 
-                    value={formData.author}
-                    onChange={e => setFormData({ ...formData, author: e.target.value })}
-                    className={cn(
-                      "w-full p-3 border border-border bg-white text-sm outline-none focus:border-ink transition-colors pr-10",
-                      isValid.author && "border-green-200"
-                    )}
-                    placeholder="napr. Ján Slovák"
-                  />
-                  {isValid.author && (
-                    <CheckCircle2 size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-green-500" />
+      {/* Main Form Content */}
+      <div className="space-y-12">
+        {/* Author Info Section - Full Width */}
+        <div className="space-y-6">
+          <h3 className="text-[11px] font-bold uppercase tracking-[2px] text-muted border-b border-border pb-2">{t.personalInfo}</h3>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+            <div className="space-y-2">
+              <label className="text-[11px] uppercase font-bold text-muted">{t.fullName}{req?.author && " *"}</label>
+              <div className="relative">
+                <input 
+                  type="text" 
+                  value={formData.author}
+                  onChange={e => setFormData({ ...formData, author: e.target.value })}
+                  className={cn(
+                    "w-full p-3 border border-border bg-white text-sm outline-none focus:border-ink transition-colors pr-10",
+                    isValid.author && "border-green-200"
                   )}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2 relative">
-                  <label className="text-[11px] uppercase font-bold text-muted">{t.email}</label>
-                  <div className="relative">
-                    <input 
-                      type="email" 
-                      value={formData.email}
-                      onChange={e => setFormData({ ...formData, email: e.target.value })}
-                      className={cn(
-                        "w-full p-3 border border-border bg-white text-sm outline-none focus:border-ink transition-colors pr-10",
-                        isValid.email && "border-green-200"
-                      )}
-                      placeholder="email@example.sk"
-                    />
-                    {isValid.email && (
-                      <CheckCircle2 size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-green-500" />
-                    )}
-                  </div>
-                </div>
-                <div className="space-y-2 relative">
-                  <label className="text-[11px] uppercase font-bold text-muted">{t.instagram}</label>
-                  <div className="relative">
-                    <input 
-                      type="text" 
-                      value={formData.instagram}
-                      onChange={e => setFormData({ ...formData, instagram: e.target.value })}
-                      className={cn(
-                        "w-full p-3 border border-border bg-white text-sm outline-none focus:border-ink transition-colors pr-10",
-                        isValid.instagram && "border-green-200"
-                      )}
-                      placeholder="@instagram"
-                    />
-                    {isValid.instagram && (
-                      <CheckCircle2 size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-green-500" />
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-2 relative">
-                <label className="text-[11px] uppercase font-bold text-muted">{t.webpage}</label>
-                <div className="relative">
-                  <input 
-                    type="text" 
-                    value={formData.webpage}
-                    onChange={e => setFormData({ ...formData, webpage: e.target.value })}
-                    className={cn(
-                      "w-full p-3 border border-border bg-white text-sm outline-none focus:border-ink transition-colors pr-10",
-                      formData.webpage && isValid.webpage && "border-green-200"
-                    )}
-                    placeholder="https://www.author.sk"
-                  />
-                  {formData.webpage && isValid.webpage && (
-                    <CheckCircle2 size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-green-500" />
-                  )}
-                </div>
-              </div>
-
-              <div className="space-y-2 relative">
-                <label className="text-[11px] uppercase font-bold text-muted">{t.address}</label>
-                <div className="relative">
-                  <textarea 
-                    value={formData.address}
-                    onChange={e => setFormData({ ...formData, address: e.target.value })}
-                    className={cn(
-                      "w-full p-3 border border-border bg-white text-sm outline-none focus:border-ink transition-colors h-24 resize-none pr-10",
-                      isValid.address && "border-green-200"
-                    )}
-                    placeholder="Ulica, Obec, PSČ, Štát"
-                  />
-                  {isValid.address && (
-                    <CheckCircle2 size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-green-500" />
-                  )}
-                </div>
-              </div>
-
-              <div className="p-5 border border-border bg-paper/50 space-y-4">
-                <label className="text-[11px] uppercase font-bold text-accent">{t.consentTitle}</label>
-                <div className="flex gap-3 items-start">
-                  <input type="checkbox" className="mt-1 w-4 h-4 border-border rounded-none" defaultChecked />
-                  <p className="text-[11px] leading-relaxed text-muted">{t.consentText}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Right Column: Photos and Upload Zone */}
-        <div className="space-y-8 flex flex-col">
-          <div className="space-y-6 flex-1 flex flex-col">
-            <div className="flex items-center justify-between border-b border-border pb-2">
-              <h3 className="text-[11px] font-bold uppercase tracking-[2px] text-muted">{t.photosTitle}</h3>
-              <div className="flex flex-wrap justify-end gap-x-4 gap-y-1">
-                {(settings?.categories || []).map(cat => {
-                  const count = photos.filter(p => p.category === cat.id).length;
-                  const max = parseInt(settings?.maxPhotosPerCategory || "5");
-                  return (
-                    <span key={cat.id} className={cn("text-[8px] font-bold uppercase tracking-widest", count > max ? "text-red-500" : "text-muted")}>
-                      {cat.name?.split(" / ")[0] || cat.id}: {count}/{max}
-                    </span>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div 
-              className={cn(
-                "flex-1 min-h-[300px] border-2 border-dashed transition-all flex flex-col items-center justify-center p-10 text-center relative group",
-                isDragging ? "border-accent bg-accent/5" : "border-border hover:bg-paper"
-              )}
-              onDragOver={onDragOver}
-              onDragLeave={onDragLeave}
-              onDrop={onDrop}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <input type="file" multiple accept=".jpg,.jpeg,.png,.tiff,.tif" className="hidden" onChange={handleFileSelect} ref={fileInputRef} />
-              
-              <div className="space-y-4">
-                <div className="w-12 h-12 rounded-full bg-paper border border-border flex items-center justify-center mx-auto group-hover:scale-110 transition-transform">
-                  <Upload size={20} className="text-accent" />
-                </div>
-                <div className="space-y-1">
-                  <p className="text-[11px] uppercase font-bold tracking-widest text-ink">{t.uploadTitle}</p>
-                  <p className="text-[9px] text-muted uppercase tracking-tight max-w-[280px] mx-auto leading-relaxed">
-                    {t.uploadNote}
-                  </p>
-                </div>
-              </div>
-
-              <div className="absolute bottom-4 left-0 right-0">
-                <p className="text-[8px] uppercase tracking-[3px] text-muted font-bold">
-                  {lang === "sk" ? "Potiahnite súbory sem alebo kliknite" : "Drag files here or click to upload"}
-                </p>
-              </div>
-            </div>
-
-            {/* List of uploaded photos */}
-            {photos.length > 0 && (
-              <div className="grid grid-cols-5 gap-2">
-                <AnimatePresence>
-                  {photos.map((photo, idx) => (
-                    <motion.div
-                      key={idx}
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.9 }}
-                      className="aspect-square border border-border bg-ink overflow-hidden group relative"
-                    >
-                      <img src={photo.previewUrl} className="w-full h-full object-cover opacity-80" alt="Preview" />
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); removePhoto(idx); }}
-                        className="absolute inset-0 bg-ink/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        <X size={16} className="text-white" />
-                      </button>
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
-              </div>
-            )}
-          </div>
-
-            {/* Photo Details (if photos selected) */}
-            {photos.length > 0 && (
-              <div className="space-y-4 pt-4">
-                <label className="text-[11px] uppercase font-bold text-muted">{t.detailsTitle}</label>
-                <div className="grid grid-cols-1 gap-4">
-                  {photos.map((photo, idx) => (
-                    <div key={idx} className="p-4 border border-border bg-paper/30 grid grid-cols-12 gap-4 items-end">
-                      <div className="col-span-8 flex flex-col gap-2">
-                        <input 
-                          type="text" 
-                          value={photo.name}
-                          onChange={e => updatePhotoInfo(idx, { name: e.target.value })}
-                          className="w-full border-b border-border bg-transparent p-1 text-sm font-bold outline-none focus:border-ink"
-                          placeholder={t.photoName}
-                        />
-                        <textarea 
-                          value={photo.description}
-                          onChange={e => updatePhotoInfo(idx, { description: e.target.value })}
-                          className="w-full text-[11px] bg-white border border-border p-2 mt-2 h-16 outline-none resize-none"
-                          placeholder={t.photoDesc}
-                        />
-                      </div>
-                      <div className="col-span-4 flex flex-col gap-2">
-                        <select 
-                          value={photo.category}
-                          onChange={e => updatePhotoInfo(idx, { category: e.target.value })}
-                          className="w-full border border-border p-2 text-xs font-bold uppercase outline-none bg-white"
-                        >
-                          {(settings?.categories || []).map(cat => (
-                            <option key={cat.id} value={cat.id}>{cat.name?.split(" / ")[0] || cat.id}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            
-            <div className="pt-6 space-y-4">
-              {error && <p className="text-red-600 text-[11px] font-bold uppercase mb-4">{error}</p>}
-              <button
-                onClick={handleSubmit}
-                disabled={loading || photos.length === 0}
-                className={cn(
-                  "w-full py-4 bg-ink text-white text-sm font-bold uppercase tracking-[2px] transition-all hover:opacity-90 active:scale-[0.98]",
-                  (loading || photos.length === 0) && "opacity-20 cursor-not-allowed"
+                  placeholder="napr. Ján Slovák"
+                />
+                {formData.author && isValid.author && (
+                  <CheckCircle2 size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-green-500" />
                 )}
-              >
-                {loading ? <Loader2 size={20} className="mx-auto animate-spin" /> : t.submit}
-              </button>
+              </div>
             </div>
+
+            <div className="space-y-2">
+              <label className="text-[11px] uppercase font-bold text-muted">{t.email}{req?.email && " *"}</label>
+              <div className="relative">
+                <input 
+                  type="email" 
+                  value={formData.email}
+                  onChange={e => setFormData({ ...formData, email: e.target.value })}
+                  className={cn(
+                    "w-full p-3 border border-border bg-white text-sm outline-none focus:border-ink transition-colors pr-10",
+                    isValid.email && "border-green-200"
+                  )}
+                  placeholder="email@example.sk"
+                />
+                {formData.email && isValid.email && (
+                  <CheckCircle2 size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-green-500" />
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[11px] uppercase font-bold text-muted">{t.instagram}{req?.instagram && " *"}</label>
+              <div className="relative">
+                <input 
+                  type="text" 
+                  value={formData.instagram}
+                  onChange={e => setFormData({ ...formData, instagram: e.target.value })}
+                  className={cn(
+                    "w-full p-3 border border-border bg-white text-sm outline-none focus:border-ink transition-colors pr-10",
+                    formData.instagram && isValid.instagram && "border-green-200"
+                  )}
+                  placeholder="@instagram"
+                />
+                {formData.instagram && isValid.instagram && (
+                  <CheckCircle2 size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-green-500" />
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[11px] uppercase font-bold text-muted">{t.webpage}</label>
+              <div className="relative">
+                <input 
+                  type="text" 
+                  value={formData.webpage}
+                  onChange={e => setFormData({ ...formData, webpage: e.target.value })}
+                  className={cn(
+                    "w-full p-3 border border-border bg-white text-sm outline-none focus:border-ink transition-colors pr-10",
+                    formData.webpage && isValid.webpage && "border-green-200"
+                  )}
+                  placeholder="https://www.author.sk"
+                />
+                {formData.webpage && isValid.webpage && (
+                  <CheckCircle2 size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-green-500" />
+                )}
+              </div>
+            </div>
+
+            <div className="md:col-span-1 lg:col-span-2 space-y-2">
+              <label className="text-[11px] uppercase font-bold text-muted">{t.address}{req?.address && " *"}</label>
+              <div className="relative">
+                <input 
+                  type="text" 
+                  value={formData.address}
+                  onChange={e => setFormData({ ...formData, address: e.target.value })}
+                  className={cn(
+                    "w-full p-3 border border-border bg-white text-sm outline-none focus:border-ink transition-colors pr-10",
+                    isValid.address && "border-green-200"
+                  )}
+                  placeholder="Ulica, Obec, PSČ, Štát"
+                />
+                {formData.address && isValid.address && (
+                  <CheckCircle2 size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-green-500" />
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Photos Upload Section - Multi Column */}
+        <div className="space-y-6">
+          <h3 className="text-[11px] font-bold uppercase tracking-[2px] text-muted border-b border-border pb-2">{t.photosTitle}</h3>
+          
+          <div className={cn(
+            "grid gap-8",
+            (settings?.categories?.length || 0) <= 1 ? "grid-cols-1" : 
+            (settings?.categories?.length || 0) === 2 ? "grid-cols-1 lg:grid-cols-2" : 
+            "grid-cols-1 lg:grid-cols-3"
+          )}>
+            {(settings?.categories || []).map((cat) => {
+              if (!cat || !cat.id) return null;
+              const catPhotos = photos.filter(p => p.category === cat.id);
+              return (
+                <div key={cat.id} className="space-y-4 group/cat">
+                <div className="flex items-center justify-between p-3 bg-paper/50 border border-border group-hover/cat:border-accent transition-colors">
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 bg-ink text-white rounded-full flex items-center justify-center text-[10px] font-bold">
+                      {cat.id}
+                    </div>
+                    <h4 className="text-[10px] font-bold uppercase text-ink tracking-widest">{cat.name?.split(" / ")?.[0] || cat.id}</h4>
+                  </div>
+                  <span className={cn(
+                    "text-[9px] font-bold px-2 py-0.5 rounded-full",
+                    catPhotos.length > parseInt(settings?.maxPhotosPerCategory || "5") 
+                      ? "bg-red-100 text-red-600" 
+                      : "bg-ink/5 text-muted"
+                  )}>
+                    {catPhotos.length}/{settings?.maxPhotosPerCategory || 5}
+                  </span>
+                </div>
+
+                <div 
+                  onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setIsDragging(false);
+                    const files = Array.from(e.dataTransfer.files as FileList);
+                    handleFiles(files, cat.id);
+                  }}
+                  className={cn(
+                    "h-32 border-2 border-dashed flex flex-col items-center justify-center p-4 transition-all hover:bg-paper cursor-pointer rounded-none",
+                    isDragging ? "border-accent bg-accent/5" : "border-border"
+                  )}
+                  onClick={() => {
+                    const input = document.createElement("input");
+                    input.type = "file";
+                    input.multiple = true;
+                    input.accept = ".jpg,.jpeg,.png,.tiff,.tif";
+                    input.onchange = (e) => handleFileSelect(e as any, cat.id);
+                    input.click();
+                  }}
+                >
+                  <Upload size={16} className="text-muted mb-2" />
+                  <p className="text-[9px] text-muted font-bold uppercase tracking-wider">{lang === "sk" ? "PRIDAŤ FOTKY" : "ADD PHOTOS"}</p>
+                </div>
+
+                {/* Grid for uploaded photos in this category */}
+                <div className="grid grid-cols-1 gap-4">
+                  <AnimatePresence>
+                    {(photos || []).filter(p => p.category === cat.id).map((photo, i) => {
+                      const globalIdx = photos.findIndex(p => p === photo);
+                      return (
+                        <motion.div 
+                          key={globalIdx}
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, scale: 0.95 }}
+                          className="border border-border bg-white"
+                        >
+                          <div className="flex gap-4 p-3 relative group">
+                            <div className="w-16 h-16 bg-paper shrink-0 overflow-hidden border border-border">
+                              <img src={photo.previewUrl} className="w-full h-full object-cover" alt="Preview" />
+                            </div>
+                            <div className="flex-1 space-y-2">
+                               <input 
+                                type="text" 
+                                value={photo.name}
+                                onChange={e => updatePhotoInfo(globalIdx, { name: e.target.value })}
+                                className="w-full border-b border-border bg-transparent p-1 text-[11px] font-bold outline-none focus:border-ink"
+                                placeholder={photo.file?.name.split(".")[0] || t.photoName}
+                              />
+                              <textarea 
+                                value={photo.description}
+                                onChange={e => updatePhotoInfo(globalIdx, { description: e.target.value })}
+                                className="w-full text-[10px] bg-white border border-border p-2 h-12 outline-none resize-none leading-tight"
+                                placeholder={t.photoDesc}
+                              />
+                            </div>
+                            <button 
+                              onClick={() => removePhoto(globalIdx)}
+                              className="absolute top-2 right-2 p-1 text-muted hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                  </AnimatePresence>
+                </div>
+              </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Global Submit */}
+        <div className="pt-10 border-t border-border flex flex-col space-y-8">
+          <div className="space-y-4 max-w-2xl">
+             <div className="flex gap-3 items-start p-4 bg-paper/30 border border-border">
+                <input 
+                  type="checkbox" 
+                  id="gdpr-check"
+                  className="mt-1 w-4 h-4 accent-ink border-border rounded-none cursor-pointer" 
+                  checked={formData.gdprConsent}
+                  onChange={e => setFormData({ ...formData, gdprConsent: e.target.checked })}
+                />
+                <label htmlFor="gdpr-check" className="text-[11px] leading-relaxed text-muted cursor-pointer select-none">
+                  {t.consentText}
+                </label>
+              </div>
+
+             <div className="flex gap-3 items-start p-4 bg-paper/30 border border-border">
+                <input 
+                  type="checkbox" 
+                  id="rules-check"
+                  className="mt-1 w-4 h-4 accent-ink border-border rounded-none cursor-pointer" 
+                  checked={formData.rulesConsent}
+                  onChange={e => setFormData({ ...formData, rulesConsent: e.target.checked })}
+                />
+                <label htmlFor="rules-check" className="text-[11px] leading-relaxed text-muted cursor-pointer select-none">
+                  {lang === "sk" 
+                    ? "Čestne vyhlasujem, že som autorom zaslaných diel a súhlasím s podmienkami súťaže. "
+                    : "I solemnly declare that I am the author of the submitted works and I agree with the competition conditions. "}
+                  <button 
+                    onClick={() => setShowRules(true)}
+                    className="text-accent font-bold hover:underline"
+                  >
+                    {lang === "sk" ? "Zobraziť podmienky súťaže" : "View competition rules"}
+                  </button>
+                </label>
+              </div>
+          </div>
+
+          <AnimatePresence>
+            {showRules && (
+              <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-ink/80 backdrop-blur-sm"
+                onClick={() => setShowRules(false)}
+              >
+                <motion.div 
+                  initial={{ scale: 0.95, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0.95, opacity: 0 }}
+                  onClick={e => e.stopPropagation()}
+                  className="bg-white max-w-2xl w-full max-h-[80vh] overflow-y-auto p-10 border border-border shadow-2xl space-y-6"
+                >
+                  <div className="flex items-center justify-between border-b border-border pb-4">
+                    <h3 className="text-sm font-bold uppercase tracking-widest text-ink">
+                      {lang === "sk" ? "Podmienky súťaže" : "Competition Rules"}
+                    </h3>
+                    <button onClick={() => setShowRules(false)} className="hover:text-accent transition-colors">
+                      <X size={20} />
+                    </button>
+                  </div>
+                  <div className="prose prose-sm max-w-none prose-headings:text-ink prose-headings:font-bold prose-headings:uppercase prose-headings:tracking-widest prose-p:text-muted prose-li:text-muted whitespace-pre-wrap font-sans">
+                    <ReactMarkdown>{settings?.rulesText || "Competition rules will be provided by the organizer."}</ReactMarkdown>
+                  </div>
+                  <div className="pt-6 border-t border-border flex justify-end">
+                    <button 
+                      onClick={() => setShowRules(false)}
+                      className="px-8 py-3 bg-ink text-white text-[10px] font-bold uppercase tracking-widest"
+                    >
+                      {lang === "sk" ? "Zavrieť" : "Close"}
+                    </button>
+                  </div>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+            <p className="text-[10px] text-muted uppercase tracking-widest max-w-sm">
+              {lang === "sk" 
+                ? "Všetky polia označené * sú povinné. Odoslaním súhlasíte s podmienkami súťaže." 
+                : "All fields marked with * are required. By submitting you agree to competition terms."}
+            </p>
+            <button
+              onClick={handleSubmit}
+              disabled={loading || photos.length === 0}
+              className={cn(
+                "w-full md:w-80 py-4 bg-ink text-white text-[11px] font-bold uppercase tracking-[2px] transition-all hover:opacity-90 active:scale-[0.98]",
+                loading && "opacity-80"
+              )}
+            >
+              {loading ? <Loader2 size={18} className="mx-auto animate-spin" /> : t.submit}
+            </button>
           </div>
         </div>
       </div>
-    );
+    </div>
+  );
 }

@@ -156,7 +156,7 @@ export default function EvaluatorInterface({ evalId, lang }: Props) {
               <div className="z-10 text-center px-6">
                 <span className="text-[120px] font-black opacity-[0.03] absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 select-none">{cat.id}</span>
                 <p className="text-[10px] font-bold uppercase tracking-widest text-muted">{lang === "sk" ? "Kategória" : "Category"}</p>
-                <h3 className="text-2xl md:text-3xl font-light tracking-tight uppercase mt-2">{cat.name?.split(" / ")[0] || cat.id}</h3>
+                <h3 className="text-2xl md:text-3xl font-light tracking-tight uppercase mt-2">{cat.name?.split(" / ")?.[0] || cat.id}</h3>
               </div>
               <div className="z-10 opacity-0 group-hover:opacity-100 transition-opacity">
                 <div className="bg-ink text-white px-8 py-3 text-[10px] font-bold uppercase tracking-widest">
@@ -223,7 +223,7 @@ export default function EvaluatorInterface({ evalId, lang }: Props) {
                 <ChevronLeft size={20} />
              </button>
              <p className="text-[11px] text-muted uppercase font-bold tracking-widest">
-                {lang === "sk" ? "Porotca" : "Jury"}: {evaluatorName} — {lang === "sk" ? "Karta" : "Work"} {currentIndex + 1} {lang === "sk" ? "z" : "of"} {photos.length} — {(settings?.categories || []).find((c: any) => c.id === selectedCategory)?.name?.split(" / ")[0] || selectedCategory}
+                {lang === "sk" ? "Porotca" : "Jury"}: {evaluatorName} — {lang === "sk" ? "Karta" : "Work"} {currentIndex + 1} {lang === "sk" ? "z" : "of"} {photos.length} — {(settings?.categories || []).find((c: any) => c.id === selectedCategory)?.name?.split(" / ")?.[0] || selectedCategory}
              </p>
           </div>
           <h2 className="text-3xl font-light tracking-tight uppercase">{lang === "sk" ? "Anonymné hodnotenie" : "Anonymous Scoring"}</h2>
@@ -302,7 +302,7 @@ export default function EvaluatorInterface({ evalId, lang }: Props) {
              <div className="space-y-8">
                 <div className="space-y-1">
                   <p className="text-3xl font-light tracking-tight uppercase leading-none">{currentPhoto?.name}</p>
-                  <p className="text-[10px] font-bold uppercase tracking-[2px] text-accent mt-2">{(settings?.categories || []).find((c: any) => c.id === currentPhoto?.category)?.name?.split(" / ")[0] || currentPhoto?.category}</p>
+                  <p className="text-[10px] font-bold uppercase tracking-[2px] text-accent mt-2">{(settings?.categories || []).find((c: any) => c.id === currentPhoto?.category)?.name?.split(" / ")?.[0] || currentPhoto?.category}</p>
                 </div>
 
                 {currentPhoto?.metadata && (

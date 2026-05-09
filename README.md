@@ -13,16 +13,20 @@ A web application for managing an international caving photography competition.
 - **Limit fotografií**: Dynamicky nastaviteľný limit počtu fotiek na jednu kategóriu (predvolene 5).
 - **Potvrdenie e-mailom**: Automatické odoslanie e-mailu autorovi po úspešnom prihlásení s použitím SMTP servera.
 - **Hromadné nahranie**: Možnosť vybrať a nahrať viacero súborov naraz s náhľadmi a popismi.
+- **Súhlasy (GDPR & Pravidlá)**: Povinné zaškrtávacie polia pre súhlas so spracovaním údajov a pravidlami súťaže s odkazom na detailné podmienky.
 
 ### Administrácia (Admin Dashboard)
 - **Štatistiky**: Prehľad o počte prihlášok, unikátnych autorov a obsadenosti kategórií.
 - **Galéria**: Prehliadanie nahraných fotografií s detailmi o autorovi.
 - **Porota**: Generovanie unikátnych odkazov pre jednotlivých porotcov na hodnotenie.
-- **Nastavenia**: Správa textov (názov súťaže, pravidlá, ročník), limitov a konfigurácia SMTP servera pre e-maily.
+- **Prepojenie (Embed)**: Generovanie IFrame kódov pre jednoduché a bezpečné vloženie galérie alebo prihlášky na externé webové stránky (napr. WordPress).
+- **Nastavenia**: Správa textov (názov súťaže, ročník), limitov a konfigurácia SMTP servera.
+- **Podmienky súťaže**: Integrovaný editor s podporou Markdownu pre detailné pravidlá súťaže.
 
 ### Bezpečnosť a súkromie
-- **Izolácia nastavení**: Citlivé údaje (ako SMTP heslo alebo administrátorské prihlasovacie údaje) sú na strane servera chránené. Verejné rozhranie má prístup len k základným informáciám o súťaži.
+- **Izolácia nastavení**: Citlivé údaje (ako SMTP heslo alebo administrátorské prihlasovacie údaje) sú na strane servera chránené. 
 - **Validácia**: Všetky vstupy od užívateľov sú sanitované pred uložením do systému.
+- **IFrame Security**: Použitie moderných atribútov (`referrerpolicy`, `loading="lazy"`) pre bezpečnú integráciu.
 - **Prístup**: Administrátorská časť je chránená e-mailom a heslom definovaným v systéme.
 
 ---
@@ -35,16 +39,20 @@ A web application for managing an international caving photography competition.
 - **Photo Limits**: Dynamically configurable limit for the number of photos per category (defaults to 5).
 - **Email Confirmation**: Automatic email sent to the author upon successful submission using an SMTP server.
 - **Bulk Upload**: Support for selecting and uploading multiple files simultaneously with previews and descriptions.
+- **Consents (GDPR & Rules)**: Mandatory checkboxes for data processing consent and competition rules with links to detailed conditions.
 
 ### Administration (Admin Dashboard)
 - **Statistics**: Real-time overview of the number of submissions, unique authors, and category distributions.
 - **Gallery**: Browse all uploaded photos with detailed information about the author and work.
 - **Jury Management**: Generate unique evaluation links for individual judges.
-- **Settings**: Manage competition metadata (name, rules, edition), limits, and SMTP server configuration.
+- **Embed System**: Generate IFrame snippets for safe and easy integration of the gallery or registration form into external websites.
+- **Settings**: Manage competition metadata (name, edition), limits, and SMTP server configuration.
+- **Competition Rules**: Integrated Markdown editor for detailed rules displayed in a modal window.
 
 ### Security and Privacy
-- **Settings Isolation**: Sensitive data (such as SMTP passwords or admin credentials) are protected server-side. The public interface only accesses non-sensitive competition information.
+- **Settings Isolation**: Sensitive data (such as SMTP passwords or admin credentials) are protected server-side.
 - **Validation**: All user inputs are sanitized before being saved to the system.
+- **IFrame Security**: Implementation of modern security attributes for embedded content.
 - **Access Control**: The administration panel is secured with email and password authentication.
 
 ---

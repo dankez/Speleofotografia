@@ -32,7 +32,7 @@ async function startServer() {
 
   // Initialize CSVs with headers if they don't exist
   if (!fs.existsSync(REGISTRATIONS_CSV)) {
-    fs.writeFileSync(REGISTRATIONS_CSV, "id,author,email,instagram,webpage,address,category,photoName,originalPath,webPath,description,metadata,createdAt\n");
+    fs.writeFileSync(REGISTRATIONS_CSV, "id,author,email,instagram,webpage,address,gdprConsent,rulesConsent,category,photoName,originalPath,webPath,description,metadata,createdAt\n");
   }
   if (!fs.existsSync(RATINGS_CSV)) {
     fs.writeFileSync(RATINGS_CSV, "evalId,evalName,photoId,score,createdAt\n");
@@ -115,8 +115,51 @@ const DEFAULT_SETTINGS = {
     { id: "A", name: "Krása jaskýň / Cave Beauty" },
     { id: "B", name: "Speleomoment / Speleomoment" }
   ],
+  fieldRequirements: {
+    author: true,
+    email: true,
+    instagram: false,
+    address: true
+  },
   rulesSk: "Maximálne 5 fotografií na kategóriu. Tlačová kvalita...",
   rulesEn: "Maximum 5 photos per category. Print quality...",
+  rulesText: `SPELEOFOTOGRAFIA 2026
+23. ročník medzinárodnej súťažnej výstavy fotografií s jaskyniarskou tematikou
+
+1. Organizátori
+Slovenská speleologická spoločnosť
+Štátna ochrana prírody SR – Správa slovenských jaskýň
+Slovenské múzeum ochrany prírody a jaskyniarstva
+Mesto Liptovský Mikuláš
+
+2. Podmienky účasti
+Súťaže sa môže zúčastniť každý fotograf, ktorý splní podmienky týchto propozícií.
+Účasť v súťaži je bezplatná.
+Každý autor môže do jednej kategórie zaslať najviac 5 fotografií.
+Členovia poroty a organizátori sú z účasti v súťaži vylúčení.
+
+3. Súťažné kategórie a ceny
+Kategória A: Fotografia s príbehom – snímky znázorňujúce kras, jaskyne a jaskyniarov doplnené textovým príbehom v rozsahu do 5 000 znakov.
+Kategória B: Speleomoment – reportážna fotografia z jaskyniarskych akcií a expedícií.
+
+Ocenenia:
+V každej kategórii budú ocenené 3 najlepšie práce.
+Hlavná cena Speleofotografie 2026: Absolútny víťaz 23. ročníka vybraný odbornou porotou.
+Cena verejnosti: Na základe hlasovania na sociálnych sieťach.
+
+4. Technické parametre a spôsob prihlásenia
+Súťaž prebieha plne digitálne cez online formulár. Zasielanie prác e-mailom nie je akceptované.
+Technické požiadavky: Minimálne 3 000 px na dlhšej strane, formát .jpg, maximálna veľkosť súboru 5 MB.
+Jazyk: Názvy fotografií a sprievodné informácie musia byť v anglickom jazyku. Príbeh ku kategórii A môže byť v slovenskom alebo anglickom jazyku.
+
+5. Právne ustanovenia (Autorské práva a GDPR)
+Autorské práva: Účastník odoslaním formulára potvrdzuje, že je autorom diel. Autor udeľuje organizátorom súhlas na bezodplatné použitie fotografií na propagáciu súťaže.
+GDPR: Osobné údaje sú spracúvané výhradne za účelom realizácie súťaže v zmysle Nariadenia (EÚ) 2016/679.
+
+6. Harmonogram a porota
+Uzávierka prihlášok: 15. september 2026.
+Zloženie poroty: Pavol Kočiš (SK – predseda), Marek Audy (CZ), Cosmin Berghean (RO), Daniel Lee (RU), Pavol Staník (SK), Lukáš Kubičina (SK).
+Vyhlásenie výsledkov: November 2026, SMOPaJ Liptovský Mikuláš.`,
   maxPhotosPerCategory: "5",
   watermarkTemplate: "$author | Speleofotografia 2026",
   logoUrl: "",
@@ -147,8 +190,10 @@ app.get("/api/settings", (req, res) => {
     "museumName", 
     "edition", 
     "categories",
+    "fieldRequirements",
     "rulesSk", 
     "rulesEn", 
+    "rulesText",
     "maxPhotosPerCategory",
     "logoUrl"
   ];
@@ -420,11 +465,17 @@ app.post("/api/admin/login", (req, res) => {
       
       const stats: any = {
         total: lines.length,
-        uniqueEmails: new Set(lines.map(l => l.split(",")[2])).size
+        uniqueEmails: new Set(lines.map(l => {
+          const parts = l.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+          return parts[2] ? parts[2].replace(/^"|"$/g, '') : "";
+        })).size
       };
       
       settings.categories.forEach((cat: any) => {
-        stats[`cat${cat.id}`] = lines.filter(l => l.split(",")[3] === cat.id).length;
+        stats[`cat${cat.id}`] = lines.filter(l => {
+          const parts = l.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+          return parts[8] === cat.id;
+        }).length;
       });
       
       res.json(stats);
@@ -517,6 +568,8 @@ app.post("/api/admin/login", (req, res) => {
           `"${body.instagram.replace(/"/g, '""')}"`,
           `"${(body.webpage || "").replace(/"/g, '""')}"`,
           `"${body.address.replace(/"/g, '""')}"`,
+          body.gdprConsent || "false",
+          body.rulesConsent || "false",
           photoInfo.category,
           `"${photoInfo.name.replace(/"/g, '""')}"`,
           newOriginalName,
@@ -584,13 +637,13 @@ app.post("/api/admin/login", (req, res) => {
           id: parts[0],
           author: parts[1].replace(/^"|"$/g, '').replace(/""/g, '"'),
           email: parts[2].replace(/^"|"$/g, '').replace(/""/g, '"'),
-          category: parts[6],
-          name: parts[7].replace(/^"|"$/g, '').replace(/""/g, '"'),
-          originalPath: parts[8],
-          webPath: parts[9],
-          description: parts[10].replace(/^"|"$/g, '').replace(/""/g, '"'),
-          metadata: JSON.parse(parts[11].replace(/^"|"$/g, '').replace(/""/g, '"') || "{}"),
-          createdAt: parts[12],
+          category: parts[8],
+          name: parts[9].replace(/^"|"$/g, '').replace(/""/g, '"'),
+          originalPath: parts[10],
+          webPath: parts[11],
+          description: parts[12].replace(/^"|"$/g, '').replace(/""/g, '"'),
+          metadata: JSON.parse(parts[13].replace(/^"|"$/g, '').replace(/""/g, '"') || "{}"),
+          createdAt: parts[14],
         };
       });
       res.json(photos);
@@ -613,11 +666,11 @@ app.post("/api/admin/login", (req, res) => {
         const parts = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
         return {
           id: parts[0],
-          category: parts[6],
-          name: parts[7].replace(/^"|"$/g, '').replace(/""/g, '"'),
-          webPath: parts[9],
-          description: parts[10].replace(/^"|"$/g, '').replace(/""/g, '"'),
-          metadata: JSON.parse(parts[11].replace(/^"|"$/g, '').replace(/""/g, '"') || "{}"),
+          category: parts[8],
+          name: parts[9].replace(/^"|"$/g, '').replace(/""/g, '"'),
+          webPath: parts[11],
+          description: parts[12].replace(/^"|"$/g, '').replace(/""/g, '"'),
+          metadata: JSON.parse(parts[13].replace(/^"|"$/g, '').replace(/""/g, '"') || "{}"),
         };
       });
 
@@ -650,10 +703,10 @@ app.post("/api/admin/login", (req, res) => {
         const parts = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
         return {
           id: parts[0],
-          category: parts[6],
-          name: parts[7].replace(/^"|"$/g, '').replace(/""/g, '"'),
-          webPath: parts[9],
-          description: parts[10].replace(/^"|"$/g, '').replace(/""/g, '"'),
+          category: parts[8],
+          name: parts[9].replace(/^"|"$/g, '').replace(/""/g, '"'),
+          webPath: parts[11],
+          description: parts[12].replace(/^"|"$/g, '').replace(/""/g, '"'),
         };
       });
 

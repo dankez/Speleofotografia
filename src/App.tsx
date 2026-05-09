@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect } from "react";
-import { Camera, Shield, User, BarChart3, ChevronRight, Menu, X, Info, Trophy } from "lucide-react";
+import { Camera, Shield, User, BarChart3, ChevronRight, Menu, X, Info, Trophy, Loader2 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/src/lib/utils";
 import RegistrationForm from "./components/RegistrationForm";
@@ -22,8 +22,15 @@ export interface Settings {
   museumName: string;
   edition: string;
   categories: { id: string, name: string }[];
+  fieldRequirements: {
+    author: boolean;
+    email: boolean;
+    instagram: boolean;
+    address: boolean;
+  };
   rulesSk: string;
   rulesEn: string;
+  rulesText?: string;
   maxPhotosPerCategory: string;
   logoUrl?: string;
 }
@@ -33,6 +40,7 @@ export default function App() {
   const [evalId, setEvalId] = useState<string | null>(null);
   const [lang, setLang] = useState<Lang>("sk");
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -49,6 +57,7 @@ export default function App() {
   }, []);
 
   const fetchSettings = async () => {
+    setLoading(true);
     try {
       const res = await fetch("/api/settings");
       if (res.ok) {
@@ -56,6 +65,8 @@ export default function App() {
       }
     } catch (e) {
       console.error(e);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -83,7 +94,7 @@ export default function App() {
             )}
             <div className="text-[14px] font-extrabold tracking-[2px] uppercase border-l-[3px] border-ink pl-3 group-hover:border-accent transition-colors">
               {settings?.contestName?.split(" ").slice(0, -1).join(" ") || settings?.contestName}<br />
-              {(settings?.contestName?.split(" ").length || 0) > 1 ? settings?.contestName?.split(" ").slice(-1)[0] : ""}
+              {(settings?.contestName?.split(" ")?.length || 0) > 1 ? settings?.contestName?.split(" ").slice(-1)[0] : ""}
             </div>
           </button>
           
@@ -150,18 +161,23 @@ export default function App() {
         {/* Scrollable View Content */}
         <div className="flex-1 overflow-y-auto">
           <div className="p-10 max-w-6xl mx-auto">
-            <AnimatePresence mode="wait">
-              {currentView === "home" && (
-                <motion.div
-                  key="home"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.2 }}
-                >
-                  <RegistrationForm lang={lang} settings={settings} />
-                </motion.div>
-              )}
+            {loading ? (
+              <div className="flex items-center justify-center h-64">
+                <Loader2 size={32} className="animate-spin text-muted" />
+              </div>
+            ) : (
+              <AnimatePresence mode="wait">
+                {currentView === "home" && (
+                  <motion.div
+                    key="home"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <RegistrationForm lang={lang} settings={settings} />
+                  </motion.div>
+                )}
 
               {currentView === "public" && (
                 <motion.div
@@ -207,6 +223,7 @@ export default function App() {
                 </motion.div>
               )}
             </AnimatePresence>
+          )}
           </div>
         </div>
       </main>

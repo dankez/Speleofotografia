@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Heart, Loader2, Maximize2, X, ChevronLeft, ChevronRight, Info } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/src/lib/utils";
-import { Lang } from "../App";
+import { Lang, Settings } from "../App";
 
 interface PublicPhoto {
   id: string;

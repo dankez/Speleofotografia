@@ -14,6 +14,8 @@ export interface Registration {
   webpage?: string;
   address: string;
   photos: PhotoInfo[];
+  gdprConsent: boolean;
+  rulesConsent: boolean;
 }
 
 export interface Evaluator {
@@ -28,7 +30,9 @@ export interface Photo {
   category: string;
   name: string;
   path: string;
+  webPath?: string;
   description: string;
+  metadata?: any;
   createdAt: string;
 }
 
