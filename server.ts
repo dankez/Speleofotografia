@@ -6,8 +6,11 @@ import multer from "multer";
 import nodemailer from "nodemailer";
 import sharp from "sharp";
 import exif from "exif-reader";
+import archiver from "archiver";
 import { v4 as uuidv4 } from "uuid";
 import { fileURLToPath } from "url";
+
+console.log("Modules loaded");
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,6 +25,7 @@ async function startServer() {
   
   if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR);
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
+  console.log("Directories ready");
 
   const REGISTRATIONS_CSV = path.join(DATA_DIR, "registrations.csv");
   const RATINGS_CSV = path.join(DATA_DIR, "ratings.csv");
@@ -32,7 +36,7 @@ async function startServer() {
 
   // Initialize CSVs with headers if they don't exist
   if (!fs.existsSync(REGISTRATIONS_CSV)) {
-    fs.writeFileSync(REGISTRATIONS_CSV, "id,author,email,instagram,webpage,address,gdprConsent,rulesConsent,category,photoName,originalPath,webPath,description,metadata,createdAt\n");
+    fs.writeFileSync(REGISTRATIONS_CSV, "id,author,email,instagram,webpage,address,gdprConsent,rulesConsent,category,photoName,originalPath,webPath,description,metadata,createdAt,shortlisted\n");
   }
   if (!fs.existsSync(RATINGS_CSV)) {
     fs.writeFileSync(RATINGS_CSV, "evalId,evalName,photoId,score,createdAt\n");
@@ -74,8 +78,10 @@ async function startServer() {
   if (!fs.existsSync(INVITATIONS_JSON)) {
     fs.writeFileSync(INVITATIONS_JSON, JSON.stringify([], null, 2));
   }
+  console.log("Data files initialized");
 
   app.use(express.json());
+  console.log("Middlewares configured");
   
   // Serve uploaded photos
   app.use("/uploads", express.static(UPLOADS_DIR));
@@ -111,6 +117,7 @@ const DEFAULT_SETTINGS = {
   contestName: "Speleofotografia 2025",
   museumName: "Slovenské múzeum ochrany prírody a jaskyniarstva",
   edition: "23. ročník",
+  contestStatus: "submissions",
   categories: [
     { id: "A", name: "Krása jaskýň / Cave Beauty" },
     { id: "B", name: "Speleomoment / Speleomoment" }
@@ -160,6 +167,7 @@ GDPR: Osobné údaje sú spracúvané výhradne za účelom realizácie súťaž
 Uzávierka prihlášok: 15. september 2026.
 Zloženie poroty: Pavol Kočiš (SK – predseda), Marek Audy (CZ), Cosmin Berghean (RO), Daniel Lee (RU), Pavol Staník (SK), Lukáš Kubičina (SK).
 Vyhlásenie výsledkov: November 2026, SMOPaJ Liptovský Mikuláš.`,
+  debugMode: false,
   maxPhotosPerCategory: "5",
   watermarkTemplate: "$author | Speleofotografia 2026",
   logoUrl: "",
@@ -189,11 +197,13 @@ app.get("/api/settings", (req, res) => {
     "contestName", 
     "museumName", 
     "edition", 
+    "contestStatus",
     "categories",
     "fieldRequirements",
     "rulesSk", 
     "rulesEn", 
     "rulesText",
+    "debugMode",
     "maxPhotosPerCategory",
     "logoUrl"
   ];
@@ -576,7 +586,8 @@ app.post("/api/admin/login", (req, res) => {
           webName,
           `"${photoInfo.description.replace(/"/g, '""')}"`,
           `"${JSON.stringify(metadata).replace(/"/g, '""')}"`,
-          timestamp
+          timestamp,
+          "false" // shortlisted
         ].join(",");
         rows.push(row);
       }
@@ -631,19 +642,45 @@ app.post("/api/admin/login", (req, res) => {
       if (!fs.existsSync(REGISTRATIONS_CSV)) return res.json([]);
       const data = fs.readFileSync(REGISTRATIONS_CSV, "utf8");
       const lines = data.trim().split("\n").slice(1);
+      
+      const ratingsData = fs.existsSync(RATINGS_CSV) ? fs.readFileSync(RATINGS_CSV, "utf8").trim().split("\n").slice(1) : [];
+      const votesData = fs.existsSync(PUBLIC_VOTES_CSV) ? fs.readFileSync(PUBLIC_VOTES_CSV, "utf8").trim().split("\n").slice(1) : [];
+      
+      const photoRatings: Record<string, number[]> = {};
+      ratingsData.forEach(r => {
+        const parts = r.split(",");
+        const pid = parts[2];
+        const score = parseInt(parts[3]);
+        if (!photoRatings[pid]) photoRatings[pid] = [];
+        photoRatings[pid].push(score);
+      });
+
+      const photoVotes: Record<string, number> = {};
+      votesData.forEach(v => {
+        const [pid] = v.split(",");
+        photoVotes[pid] = (photoVotes[pid] || 0) + 1;
+      });
+
       const photos = lines.map(line => {
         const parts = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+        const pid = parts[0];
+        const scores = photoRatings[pid] || [];
+        const avg = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+        
         return {
-          id: parts[0],
-          author: parts[1].replace(/^"|"$/g, '').replace(/""/g, '"'),
-          email: parts[2].replace(/^"|"$/g, '').replace(/""/g, '"'),
-          category: parts[8],
-          name: parts[9].replace(/^"|"$/g, '').replace(/""/g, '"'),
-          originalPath: parts[10],
-          webPath: parts[11],
-          description: parts[12].replace(/^"|"$/g, '').replace(/""/g, '"'),
-          metadata: JSON.parse(parts[13].replace(/^"|"$/g, '').replace(/""/g, '"') || "{}"),
-          createdAt: parts[14],
+          id: pid,
+          author: (parts[1] || "").replace(/^"|"$/g, '').replace(/""/g, '"'),
+          email: (parts[2] || "").replace(/^"|"$/g, '').replace(/""/g, '"'),
+          category: parts[8] || "",
+          name: (parts[9] || "").replace(/^"|"$/g, '').replace(/""/g, '"'),
+          originalPath: parts[10] || "",
+          webPath: parts[11] || "",
+          description: (parts[12] || "").replace(/^"|"$/g, '').replace(/""/g, '"'),
+          metadata: JSON.parse((parts[13] || "{}").replace(/^"|"$/g, '').replace(/""/g, '"') || "{}"),
+          createdAt: parts[14] || "",
+          shortlisted: parts[15] === "true",
+          averageScore: parseFloat(avg.toFixed(2)),
+          voteCount: photoVotes[pid] || 0
         };
       });
       res.json(photos);
@@ -662,20 +699,28 @@ app.post("/api/admin/login", (req, res) => {
       const data = fs.readFileSync(REGISTRATIONS_CSV, "utf8");
       const lines = data.trim().split("\n").slice(1);
       
+      const settings = JSON.parse(fs.readFileSync(SETTINGS_JSON, "utf8"));
+      
       let photos = lines.map(line => {
         const parts = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
         return {
           id: parts[0],
-          category: parts[8],
-          name: parts[9].replace(/^"|"$/g, '').replace(/""/g, '"'),
-          webPath: parts[11],
-          description: parts[12].replace(/^"|"$/g, '').replace(/""/g, '"'),
-          metadata: JSON.parse(parts[13].replace(/^"|"$/g, '').replace(/""/g, '"') || "{}"),
+          category: parts[8] || "",
+          name: (parts[9] || "").replace(/^"|"$/g, '').replace(/""/g, '"'),
+          webPath: parts[11] || "",
+          description: (parts[12] || "").replace(/^"|"$/g, '').replace(/""/g, '"'),
+          metadata: JSON.parse((parts[13] || "{}").replace(/^"|"$/g, '').replace(/""/g, '"') || "{}"),
+          shortlisted: parts[15] === "true"
         };
       });
 
       if (category) {
         photos = photos.filter(p => p.category === category);
+      }
+
+      // If in final judging session, only show shortlisted photos
+      if (settings.contestStatus === "judging") {
+        photos = photos.filter(p => p.shortlisted);
       }
 
       // Shuffle randomized
@@ -760,13 +805,80 @@ app.post("/api/admin/login", (req, res) => {
     }
   });
 
-  // Admin: Download public votes CSV directly
-  app.get("/api/admin/export/public-votes", (req, res) => {
+  app.get("/api/admin/export/photos-zip", (req, res) => {
     try {
-      if (!fs.existsSync(PUBLIC_VOTES_CSV)) return res.status(404).send("File not found");
-      res.download(PUBLIC_VOTES_CSV, "public_votes_export.csv");
+      const archive = archiver("zip", { zlib: { level: 9 } });
+      res.attachment("contest_photos.zip");
+      archive.on("error", (err) => { throw err; });
+      archive.pipe(res);
+      
+      // Add photos from UPLOADS_DIR
+      // We only want authors' photos if possible, but let's just zip the whole directory for simplicity
+      // and exclusion of processed webp files if preferred.
+      const files = fs.readdirSync(UPLOADS_DIR);
+      files.forEach(file => {
+        // Only include non-webp files (original uploads)
+        if (!file.endsWith(".webp")) {
+          archive.file(path.join(UPLOADS_DIR, file), { name: file });
+        }
+      });
+      
+      archive.finalize();
     } catch (e) {
       res.status(500).send("Export error");
+    }
+  });
+
+  app.post("/api/admin/communicate", async (req, res) => {
+    try {
+      const { email, subject, message } = req.body;
+      const settings = JSON.parse(fs.readFileSync(SETTINGS_JSON, "utf8"));
+      
+      if (!settings.smtpUser || !settings.smtpPass) {
+        return res.status(400).json({ error: "SMTP credentials not configured" });
+      }
+
+      const transporter = nodemailer.createTransport({
+        host: settings.smtpHost,
+        port: parseInt(settings.smtpPort),
+        secure: settings.smtpSecure === "true",
+        auth: { user: settings.smtpUser, pass: settings.smtpPass },
+      });
+
+      await transporter.sendMail({
+        from: `"${settings.contestName}" <${settings.emailFrom}>`,
+        to: email,
+        subject,
+        text: message,
+        html: `<div style="font-family:sans-serif;line-height:1.6;">${message.replace(/\n/g, '<br/>')}</div>`
+      });
+
+      res.json({ success: true });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: "Failed to send email" });
+    }
+  });
+
+  app.get("/api/check-uploads", (req, res) => {
+    try {
+      const email = req.query.email as string;
+      if (!email || !fs.existsSync(REGISTRATIONS_CSV)) return res.json({});
+      const data = fs.readFileSync(REGISTRATIONS_CSV, "utf8");
+      const lines = data.trim().split("\n").slice(1);
+      
+      const counts: Record<string, number> = {};
+      lines.forEach(l => {
+        const parts = l.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+        const entryEmail = parts[2] ? parts[2].replace(/^"|"$/g, '').toLowerCase() : "";
+        if (entryEmail === email.toLowerCase()) {
+          const cat = parts[8];
+          counts[cat] = (counts[cat] || 0) + 1;
+        }
+      });
+      res.json(counts);
+    } catch (e) {
+      res.status(500).json({ error: "Chyba pri kontrole limitov" });
     }
   });
 
@@ -783,8 +895,12 @@ app.post("/api/admin/login", (req, res) => {
       const deletedLine = lines.slice(1).find(l => l.startsWith(id + ","));
       if (deletedLine) {
         const parts = deletedLine.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
-        const originalPath = path.join(UPLOADS_DIR, parts[8]);
-        const webPath = path.join(UPLOADS_DIR, parts[9]);
+        const originalName = parts[10];
+        const webName = parts[11];
+        
+        const originalPath = path.join(UPLOADS_DIR, originalName);
+        const webPath = path.join(UPLOADS_DIR, webName);
+        
         if (fs.existsSync(originalPath)) fs.unlinkSync(originalPath);
         if (fs.existsSync(webPath)) fs.unlinkSync(webPath);
       }
@@ -792,7 +908,100 @@ app.post("/api/admin/login", (req, res) => {
       fs.writeFileSync(REGISTRATIONS_CSV, header + "\n" + remaining.join("\n") + (remaining.length ? "\n" : ""));
       res.json({ success: true });
     } catch (e) {
+      console.error("Delete error:", e);
       res.status(500).json({ error: "Chyba pri mazaní" });
+    }
+  });
+
+  app.patch("/api/admin/photos/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      const updates = req.body;
+      if (!fs.existsSync(REGISTRATIONS_CSV)) return res.status(404).json({ error: "Not found" });
+      
+      const data = fs.readFileSync(REGISTRATIONS_CSV, "utf8");
+      const lines = data.trim().split("\n");
+      const header = lines[0];
+      const registrations = lines.slice(1);
+      
+      let found = false;
+      const newLines = registrations.map(line => {
+        const parts = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+        if (parts[0] === id) {
+          found = true;
+          // 0:id, 1:author, 2:email, 3:instagram, 4:webpage, 5:address, 6:gdpr, 7:rules, 8:category, 9:name, 10:orig, 11:web, 12:desc, 13:meta, 14:date
+          if (updates.author !== undefined) parts[1] = `"${updates.author.replace(/"/g, '""')}"`;
+          if (updates.email !== undefined) parts[2] = `"${updates.email.replace(/"/g, '""')}"`;
+          if (updates.category !== undefined) parts[8] = updates.category;
+          if (updates.name !== undefined) parts[9] = `"${updates.name.replace(/"/g, '""')}"`;
+          if (updates.description !== undefined) parts[12] = `"${updates.description.replace(/"/g, '""')}"`;
+          if (updates.shortlisted !== undefined) parts[15] = updates.shortlisted ? "true" : "false";
+          return parts.join(",");
+        }
+        return line;
+      });
+      
+      if (!found) return res.status(404).json({ error: "Photo not found" });
+      
+      fs.writeFileSync(REGISTRATIONS_CSV, header + "\n" + newLines.join("\n") + "\n");
+      res.json({ success: true });
+    } catch (e) {
+      console.error("Update error:", e);
+      res.status(500).json({ error: "Chyba pri aktualizácii" });
+    }
+  });
+
+  app.post("/api/admin/generate-test-data", (req, res) => {
+    try {
+      const settings = fs.existsSync(SETTINGS_JSON) ? JSON.parse(fs.readFileSync(SETTINGS_JSON, "utf8")) : {};
+      if (!settings.debugMode) {
+        return res.status(403).json({ error: "Debug mode is disabled" });
+      }
+
+      const id = Date.now().toString();
+      const author = "TEST";
+      const email = "test@example.com";
+      const category = settings.categories?.[0]?.id || "A";
+      const photoName = "Test Photo " + id;
+      
+      // Use existing file if available, otherwise write dummy
+      const existingFiles = fs.readdirSync(UPLOADS_DIR).filter(f => f.match(/\.(jpg|jpeg|png)$/i));
+      let fileName = "";
+      if (existingFiles.length > 0) {
+        const ext = path.extname(existingFiles[0]);
+        const baseName = `test_${id}`;
+        fileName = baseName + ext;
+        const targetPath = path.join(UPLOADS_DIR, fileName);
+        fs.copyFileSync(path.join(UPLOADS_DIR, existingFiles[0]), targetPath);
+      } else {
+        fileName = `test_${id}.jpg`;
+        fs.writeFileSync(path.join(UPLOADS_DIR, fileName), "dummy jpeg content");
+      }
+
+      const row = [
+        id,
+        `"${author}"`,
+        `"${email}"`,
+        `""`, // instagram
+        `""`, // webpage
+        `"Test Address"`,
+        `"true"`, // gdpr
+        `"true"`, // rules
+        `"${category}"`,
+        `"${photoName}"`,
+        `"${fileName}"`, // original
+        `"${fileName}"`, // web
+        `"Test description for debug purposes."`,
+        `""`, // metadata
+        `"${new Date().toISOString()}"`,
+        `"false"` // shortlisted
+      ].join(",");
+
+      fs.appendFileSync(REGISTRATIONS_CSV, row + "\n");
+      res.json({ success: true });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: "Failed to generate test data" });
     }
   });
 
@@ -847,6 +1056,7 @@ app.post("/api/admin/login", (req, res) => {
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
+    console.log("Starting Vite dev server...");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
@@ -865,4 +1075,8 @@ app.post("/api/admin/login", (req, res) => {
   });
 }
 
-startServer();
+console.log("Starting server...");
+startServer().catch(err => {
+  console.error("CRITICAL SERVER ERROR:", err);
+  process.exit(1);
+});

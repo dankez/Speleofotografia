@@ -89,10 +89,10 @@ export default function EvaluatorInterface({ evalId, lang }: Props) {
       const existing = prev.findIndex(r => r.photoId === currentPhoto.id);
       if (existing >= 0) {
         const next = [...prev];
-        next[existing] = { photoId: currentPhoto.id, score };
+        next[existing] = { photoId: currentPhoto.id, score, judgeId: evalId };
         return next;
       }
-      return [...prev, { photoId: currentPhoto.id, score }];
+      return [...prev, { photoId: currentPhoto.id, score, judgeId: evalId }];
     });
 
     // Save to server

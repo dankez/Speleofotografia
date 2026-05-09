@@ -24,19 +24,27 @@ export interface Evaluator {
   role: string;
 }
 
+export type ContestStatus = "submissions" | "review" | "judging" | "shortlist" | "results";
+
 export interface Photo {
   id: string;
   author: string;
+  email: string;
   category: string;
   name: string;
   path: string;
+  originalPath: string;
   webPath?: string;
   description: string;
   metadata?: any;
   createdAt: string;
+  shortlisted?: boolean;
+  averageScore?: number;
+  voteCount?: number;
 }
 
 export interface Rating {
   photoId: string;
+  judgeId: string;
   score: number;
 }

@@ -21,6 +21,7 @@ export interface Settings {
   contestName: string;
   museumName: string;
   edition: string;
+  contestStatus: "submissions" | "review" | "judging" | "shortlist" | "results";
   categories: { id: string, name: string }[];
   fieldRequirements: {
     author: boolean;
@@ -28,9 +29,17 @@ export interface Settings {
     instagram: boolean;
     address: boolean;
   };
+  emailConfig?: {
+    service: string;
+    user: string;
+    pass: string;
+    from: string;
+    enabled: boolean;
+  };
   rulesSk: string;
   rulesEn: string;
   rulesText?: string;
+  debugMode?: boolean;
   maxPhotosPerCategory: string;
   logoUrl?: string;
 }
@@ -175,7 +184,31 @@ export default function App() {
                     exit={{ opacity: 0 }}
                     transition={{ duration: 0.2 }}
                   >
-                    <RegistrationForm lang={lang} settings={settings} />
+                    {settings?.contestStatus === "submissions" ? (
+                      <RegistrationForm lang={lang} settings={settings} />
+                    ) : (
+                      <div className="flex flex-col items-center justify-center p-20 bg-paper border border-border space-y-6 text-center">
+                        <div className="w-16 h-16 bg-muted flex items-center justify-center rounded-full">
+                          <X className="text-muted" size={32} />
+                        </div>
+                        <div className="space-y-2">
+                          <h2 className="text-2xl font-light uppercase tracking-tight">
+                            {lang === "sk" ? "Prihlasovanie uzavreté" : "Submissions Closed"}
+                          </h2>
+                          <p className="text-[11px] uppercase font-bold tracking-widest text-muted max-w-xs mx-auto">
+                            {lang === "sk" 
+                              ? "Termín na odosielanie fotografií už uplynul. Sledujte náš web pre výsledky." 
+                              : "The deadline for photo submissions has passed. Follow our website for results."}
+                          </p>
+                        </div>
+                        <button 
+                          onClick={() => setCurrentView("public")}
+                          className="px-10 py-4 bg-ink text-white text-[10px] font-bold uppercase tracking-[2px]"
+                        >
+                          {lang === "sk" ? "Prezrieť galériu" : "View Gallery"}
+                        </button>
+                      </div>
+                    )}
                   </motion.div>
                 )}
 

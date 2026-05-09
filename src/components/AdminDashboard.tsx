@@ -1,6 +1,6 @@
 import { useState, useEffect, ChangeEvent } from "react";
-import { BarChart3, Users, Image as ImageIcon, Link as LinkIcon, Plus, Copy, Check, Download, Trash2, Eye, Shield, Settings as SettingsIcon, Mail, UserPlus, Heart, Code, ExternalLink } from "lucide-react";
-import { motion } from "motion/react";
+import { BarChart3, Users, Image as ImageIcon, Link as LinkIcon, Plus, Copy, Check, Download, Trash2, Eye, Shield, Settings as SettingsIcon, Mail, UserPlus, Heart, Code, ExternalLink, X, User, LayoutGrid, List, Search, Edit2 } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/src/lib/utils";
 import type { Photo, Evaluator } from "../types";
 import { Lang, Settings } from "../App";
@@ -9,6 +9,7 @@ interface ContestSettings {
   contestName: string;
   museumName: string;
   edition: string;
+  contestStatus: "submissions" | "review" | "judging" | "shortlist" | "results";
   categories: { id: string, name: string }[];
   fieldRequirements: {
     author: boolean;
@@ -19,6 +20,7 @@ interface ContestSettings {
   rulesSk: string;
   rulesEn: string;
   rulesText?: string;
+  debugMode?: boolean;
   maxPhotosPerCategory: string;
   watermarkTemplate: string;
   logoUrl: string;
@@ -44,6 +46,7 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
     contestName: "",
     museumName: "",
     edition: "",
+    contestStatus: "submissions",
     categories: [],
     fieldRequirements: {
       author: true,
@@ -107,6 +110,16 @@ Vyhlásenie výsledkov: November 2026, SMOPaJ Liptovský Mikuláš.`,
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteStatus, setInviteStatus] = useState<"idle" | "sending" | "success" | "error">("idle");
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
+  const [photoFilter, setPhotoFilter] = useState<string>("all");
+  const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null);
+  const [galleryView, setGalleryView] = useState<"grid" | "table">("table");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [editingPhoto, setEditingPhoto] = useState<Photo | null>(null);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [commModal, setCommModal] = useState<{ open: boolean; email: string; photoId: string }>({ open: false, email: "", photoId: "" });
+  const [commSubject, setCommSubject] = useState("");
+  const [commMessage, setCommMessage] = useState("");
+  const [commStatus, setCommStatus] = useState<"idle" | "sending" | "success" | "error">("idle");
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -314,6 +327,56 @@ Vyhlásenie výsledkov: November 2026, SMOPaJ Liptovský Mikuláš.`,
     }
   };
 
+  const updatePhoto = async (id: string, updates: Partial<Photo>) => {
+    setIsUpdating(true);
+    try {
+      const res = await fetch(`/api/admin/photos/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates)
+      });
+      if (res.ok) {
+        setEditingPhoto(null);
+        fetchData();
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const sendCommunication = async () => {
+    if (!commModal.email || !commSubject || !commMessage) return;
+    setCommStatus("sending");
+    try {
+      const res = await fetch("/api/admin/communicate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: commModal.email,
+          subject: commSubject,
+          message: commMessage
+        })
+      });
+      if (res.ok) {
+        setCommStatus("success");
+        setTimeout(() => {
+          setCommModal({ open: false, email: "", photoId: "" });
+          setCommStatus("idle");
+        }, 2000);
+      } else {
+        setCommStatus("error");
+      }
+    } catch (e) {
+      setCommStatus("error");
+    }
+  };
+
+  const toggleShortlist = async (id: string, current: boolean) => {
+    await updatePhoto(id, { shortlisted: !current });
+  };
+
   if (!isAuthorized) {
     return (
       <div className="max-w-md mx-auto mt-20 p-8 border border-border bg-white space-y-6">
@@ -446,7 +509,20 @@ Vyhlásenie výsledkov: November 2026, SMOPaJ Liptovský Mikuláš.`,
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase text-muted">Contest Name</label>
+                  <label className="text-[10px] font-bold uppercase text-muted">Contest Status</label>
+                  <select 
+                    value={settings.contestStatus}
+                    onChange={e => setSettings({ ...settings, contestStatus: e.target.value as any })}
+                    className="w-full p-3 border border-border bg-white text-sm outline-none focus:border-ink"
+                  >
+                    <option value="submissions">Open for Submissions</option>
+                    <option value="review">Closed / Technical Review</option>
+                    <option value="judging">Judging Session</option>
+                    <option value="shortlist">Shortlist Round</option>
+                    <option value="results">Public Results</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
                   <input 
                     type="text" 
                     value={settings.contestName}
@@ -702,6 +778,32 @@ Vyhlásenie výsledkov: November 2026, SMOPaJ Liptovský Mikuláš.`,
               </div>
 
               <h3 className="text-[11px] font-bold uppercase tracking-[2px] text-muted border-b border-border pb-2 pt-10">
+                {lang === "sk" ? "Vývojársky režim" : "Developer Mode"}
+              </h3>
+              <div className="flex items-center justify-between p-4 bg-paper/30 border border-border">
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-ink">
+                    {lang === "sk" ? "Debug režim" : "Debug Mode"}
+                  </p>
+                  <p className="text-[10px] text-muted">
+                    {lang === "sk" ? "Umožňuje rýchle nahrávanie testovacích prihlášok." : "Allows quick upload of test applications."}
+                  </p>
+                </div>
+                <button 
+                  onClick={() => setSettings({ ...settings, debugMode: !settings.debugMode })}
+                  className={cn(
+                    "w-12 h-6 rounded-full transition-colors relative",
+                    settings.debugMode ? "bg-accent" : "bg-ink/20"
+                  )}
+                >
+                  <div className={cn(
+                    "absolute top-1 w-4 h-4 bg-white rounded-full transition-transform",
+                    settings.debugMode ? "left-7" : "left-1"
+                  )} />
+                </button>
+              </div>
+
+              <h3 className="text-[11px] font-bold uppercase tracking-[2px] text-muted border-b border-border pb-2 pt-10">
                 {lang === "sk" ? "Správa administrátorov" : "Admin Management"}
               </h3>
 
@@ -841,14 +943,14 @@ Vyhlásenie výsledkov: November 2026, SMOPaJ Liptovský Mikuláš.`,
                 </p>
               </div>
               <div className="flex gap-4">
-                <a href="/data/registrations.csv" download className="px-10 py-4 bg-ink text-white text-[11px] uppercase font-bold tracking-[2px] transition-all hover:opacity-90">
-                  {lang === "sk" ? "Prihlášky / CSV" : "Entries / CSV"}
+                <a href="/data/registrations.csv" download className="px-6 py-4 bg-ink text-white text-[11px] uppercase font-bold tracking-[2px] transition-all hover:opacity-90 flex items-center gap-2">
+                  <Download size={14} /> {lang === "sk" ? "Registre / CSV" : "Registry / CSV"}
                 </a>
-                <a href="/data/ratings.csv" download className="px-10 py-4 border border-ink text-ink text-[11px] uppercase font-bold tracking-[2px] transition-all hover:bg-ink hover:text-white">
-                  {lang === "sk" ? "Hodnotenie / CSV" : "Ratings / CSV"}
+                <a href="/api/admin/export/photos-zip" download className="px-6 py-4 border border-ink text-ink text-[11px] uppercase font-bold tracking-[2px] transition-all hover:bg-ink hover:text-white flex items-center gap-2">
+                  <ImageIcon size={14} /> {lang === "sk" ? "Originály / ZIP" : "Originals / ZIP"}
                 </a>
-                <a href="/api/admin/export/public-votes" download className="px-10 py-4 border border-accent text-accent text-[11px] uppercase font-bold tracking-[2px] transition-all hover:bg-accent hover:text-white">
-                  {lang === "sk" ? "Verejnosť / CSV" : "Public / CSV"}
+                <a href="/data/ratings.csv" download className="px-6 py-4 border border-border text-muted text-[11px] uppercase font-bold tracking-[2px] transition-all hover:border-ink hover:text-ink flex items-center gap-2">
+                  <BarChart3 size={14} /> {lang === "sk" ? "Body / CSV" : "Scores / CSV"}
                 </a>
               </div>
             </div>
@@ -1021,42 +1123,477 @@ Vyhlásenie výsledkov: November 2026, SMOPaJ Liptovský Mikuláš.`,
         )}
 
         {activeTab === "photos" && (
-          <div className="grid grid-cols-2 md:grid-cols-5 lg:grid-cols-6 gap-4">
-            {photos.map(photo => (
-              <div key={photo.id} className="aspect-square bg-ink border border-border relative group overflow-hidden">
-                <img 
-                  src={`/uploads/${photo.webPath || photo.path}`} 
-                  className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-all duration-300" 
-                  alt={photo.name} 
+          <div className="space-y-8">
+            <div className="flex flex-wrap gap-6 items-center justify-between bg-paper p-6 border border-border">
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => setPhotoFilter("all")}
+                  className={cn(
+                    "px-4 py-2 text-[10px] font-bold uppercase tracking-widest border transition-all",
+                    photoFilter === "all" ? "bg-ink text-white border-ink" : "bg-white text-muted border-border hover:border-ink"
+                  )}
+                >
+                  {lang === "sk" ? "Všetky" : "All"}
+                </button>
+                {(settings?.categories || []).map(cat => (
+                  <button 
+                    key={cat.id}
+                    onClick={() => setPhotoFilter(cat.id)}
+                    className={cn(
+                      "px-4 py-2 text-[10px] font-bold uppercase tracking-widest border transition-all",
+                      photoFilter === cat.id ? "bg-ink text-white border-ink" : "bg-white text-muted border-border hover:border-ink"
+                    )}
+                  >
+                    {cat.name?.split(" / ")?.[0] || cat.id}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex-1 max-w-sm relative">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+                <input 
+                  type="text" 
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  placeholder={lang === "sk" ? "Hľadať autora, názov..." : "Search author, name..."}
+                  className="w-full pl-10 pr-4 py-2 border border-border bg-white text-[11px] font-bold uppercase tracking-widest outline-none focus:border-ink"
                 />
-                <div className="absolute inset-x-0 bottom-0 p-3 bg-ink/80 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <div className="flex justify-between items-start">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[9px] text-white/60 uppercase font-bold tracking-widest">{photo.category}</p>
-                      <p className="text-[11px] text-white font-bold tracking-tight line-clamp-1 truncate">{photo.name}</p>
-                      {photo.author && <p className="text-[9px] text-white/40 uppercase font-bold truncate">{photo.author}</p>}
-                    </div>
-                    <button 
-                      onClick={() => deletePhoto(photo.id)}
-                      className="text-red-400 hover:text-red-500 transition-colors p-1"
-                      title={lang === "sk" ? "Zmazať" : "Delete"}
-                    >
-                      <Trash2 size={12} />
-                    </button>
-                  </div>
-                  <div className="flex items-center gap-2 mt-1">
-                    <Heart size={8} className="text-accent fill-accent" />
-                    <span className="text-[8px] font-bold text-white">{publicResults[photo.id] || 0} hlasov</span>
-                  </div>
-                  {photo.metadata?.camera && (
-                    <p className="text-[8px] text-accent font-bold mt-1 truncate">{photo.metadata.camera}</p>
-                  )}
-                  {photo.metadata?.settings && (
-                    <p className="text-[7px] text-white/30 font-mono mt-0.5 truncate">{photo.metadata.settings}</p>
-                  )}
+              </div>
+
+              <div className="flex items-center gap-4">
+                <div className="flex border border-border">
+                  <button 
+                    onClick={() => setGalleryView("grid")}
+                    className={cn("p-2 transition-colors", galleryView === "grid" ? "bg-ink text-white" : "bg-white text-muted hover:text-ink")}
+                  >
+                    <LayoutGrid size={16} />
+                  </button>
+                  <button 
+                    onClick={() => setGalleryView("table")}
+                    className={cn("p-2 transition-colors", galleryView === "table" ? "bg-ink text-white" : "bg-white text-muted hover:text-ink")}
+                  >
+                    <List size={16} />
+                  </button>
+                </div>
+                <div className="text-[10px] font-bold uppercase tracking-widest text-muted">
+                  {photos.filter(p => (photoFilter === "all" || p.category === photoFilter) && (p.author.toLowerCase().includes(searchQuery.toLowerCase()) || p.name.toLowerCase().includes(searchQuery.toLowerCase()))).length} {lang === "sk" ? "výsledkov" : "results"}
                 </div>
               </div>
-            ))}
+            </div>
+
+            {galleryView === "grid" ? (
+              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
+                {photos
+                  .filter(p => (photoFilter === "all" || p.category === photoFilter) && (p.author.toLowerCase().includes(searchQuery.toLowerCase()) || p.name.toLowerCase().includes(searchQuery.toLowerCase())))
+                  .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                  .map(photo => (
+                  <div key={photo.id} className="aspect-square bg-paper border border-border relative group overflow-hidden cursor-pointer" onClick={() => setSelectedPhoto(photo)}>
+                    <img 
+                      src={`/uploads/${photo.webPath || photo.path}`} 
+                      className="w-full h-full object-cover transition-all duration-500 group-hover:scale-110" 
+                      alt={photo.name} 
+                    />
+                    <div className="absolute inset-0 bg-ink/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <Eye size={24} className="text-white" />
+                    </div>
+                    <div className="absolute top-2 left-2 px-2 py-1 bg-ink/80 text-white text-[8px] font-bold uppercase tracking-widest">
+                      {photo.category}
+                    </div>
+                    <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); setEditingPhoto(photo); }}
+                        className="p-2 bg-white/80 text-ink hover:bg-white"
+                        title={lang === "sk" ? "Upraviť" : "Edit"}
+                      >
+                        <Edit2 size={12} />
+                      </button>
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); deletePhoto(photo.id); }}
+                        className="p-2 bg-red-500/80 text-white hover:bg-red-600"
+                        title={lang === "sk" ? "Zmazať" : "Delete"}
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                    <div className="absolute inset-x-0 bottom-0 p-3 bg-gradient-to-t from-ink/90 to-transparent">
+                      <p className="text-[10px] text-white font-bold truncate leading-none mb-1">{photo.name}</p>
+                      <p className="text-[8px] text-white/60 truncate leading-none uppercase tracking-tight">{photo.author}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="border border-border bg-white overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-paper border-b border-border">
+                      <th className="p-4 text-[9px] font-bold uppercase tracking-widest text-muted w-20">{lang === "sk" ? "Foto" : "Photo"}</th>
+                      <th className="p-4 text-[9px] font-bold uppercase tracking-widest text-muted">{lang === "sk" ? "Dielo / Autor" : "Piece / Author"}</th>
+                      <th className="p-4 text-[9px] font-bold uppercase tracking-widest text-muted">{lang === "sk" ? "Krátky list" : "Shortlist"}</th>
+                      <th className="p-4 text-[9px] font-bold uppercase tracking-widest text-muted">{lang === "sk" ? "Bodovanie" : "Scoring"}</th>
+                      <th className="p-4 text-[9px] font-bold uppercase tracking-widest text-muted text-right">{lang === "sk" ? "Akcie" : "Actions"}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {photos
+                      .filter(p => (photoFilter === "all" || p.category === photoFilter) && (p.author.toLowerCase().includes(searchQuery.toLowerCase()) || p.name.toLowerCase().includes(searchQuery.toLowerCase())))
+                      .sort((a, b) => (b.averageScore || 0) - (a.averageScore || 0))
+                      .map(photo => (
+                      <tr key={photo.id} className={cn("hover:bg-paper/50 transition-colors group", photo.shortlisted && "bg-accent/5")}>
+                        <td className="p-4">
+                          <div className="w-12 h-12 bg-paper border border-border overflow-hidden cursor-pointer" onClick={() => setSelectedPhoto(photo)}>
+                            <img src={`/uploads/${photo.webPath || photo.path}`} className="w-full h-full object-cover" alt="" />
+                          </div>
+                        </td>
+                        <td className="p-4">
+                           <div className="space-y-1">
+                            <p className="text-xs font-bold tracking-tight text-ink">{photo.name}</p>
+                            <p className="text-[10px] text-muted font-bold uppercase tracking-tight">{photo.author}</p>
+                          </div>
+                        </td>
+                        <td className="p-4">
+                           <button 
+                            onClick={() => toggleShortlist(photo.id, photo.shortlisted || false)}
+                            className={cn(
+                              "px-2 py-1 text-[9px] font-extrabold uppercase tracking-widest border transition-all",
+                              photo.shortlisted ? "bg-accent text-white border-accent" : "text-muted border-border hover:border-ink hover:text-ink"
+                            )}
+                           >
+                            {photo.shortlisted ? "SHORTLISTED" : "OFF"}
+                           </button>
+                        </td>
+                        <td className="p-4">
+                           <div className="flex items-center gap-2">
+                             <span className="text-sm font-light text-ink">{photo.averageScore || 0}</span>
+                             <span className="text-[8px] text-muted font-bold uppercase">avg</span>
+                           </div>
+                        </td>
+                        <td className="p-4">
+                          <div className="flex justify-end gap-1">
+                            <button 
+                              onClick={() => setCommModal({ open: true, email: photo.email, photoId: photo.id })}
+                              className="p-2 text-muted hover:text-accent transition-colors"
+                              title={lang === "sk" ? "Kontaktovať autora" : "Contact Author"}
+                            >
+                              <Mail size={14} />
+                            </button>
+                            <button 
+                              onClick={() => setSelectedPhoto(photo)}
+                              className="p-2 text-muted hover:text-ink transition-colors"
+                              title={lang === "sk" ? "Zobraziť" : "View"}
+                            >
+                              <Eye size={14} />
+                            </button>
+                            <button 
+                              onClick={() => setEditingPhoto(photo)}
+                              className="p-2 text-muted hover:text-ink transition-colors"
+                              title={lang === "sk" ? "Upraviť" : "Edit"}
+                            >
+                              <Edit2 size={14} />
+                            </button>
+                            <button 
+                              onClick={() => deletePhoto(photo.id)}
+                              className="p-2 text-muted hover:text-red-500 transition-colors"
+                              title={lang === "sk" ? "Zmazať" : "Delete"}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <AnimatePresence>
+              {commModal.open && (
+                 <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-ink/90 backdrop-blur-md"
+                >
+                   <motion.div 
+                    initial={{ scale: 0.95, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.95, opacity: 0 }}
+                    className="bg-white max-w-lg w-full p-10 space-y-8 shadow-2xl relative"
+                  >
+                    <button onClick={() => setCommModal({ open: false, email: "", photoId: "" })} className="absolute top-6 right-6 text-muted hover:text-ink">
+                      <X size={24} />
+                    </button>
+
+                    <div className="space-y-2">
+                       <p className="text-accent text-[11px] font-bold uppercase tracking-[2px]">{lang === "sk" ? "Správa autorovi" : "Message to Author"}</p>
+                       <h3 className="text-xl font-light tracking-tight">{commModal.email}</h3>
+                    </div>
+
+                    <div className="space-y-4">
+                       <div className="space-y-1">
+                          <label className="text-[9px] font-bold uppercase text-muted tracking-widest">Subject</label>
+                          <input 
+                            type="text" 
+                            value={commSubject}
+                            onChange={e => setCommSubject(e.target.value)}
+                            placeholder="e.g. Photo status update"
+                            className="w-full p-3 border border-border bg-paper text-sm outline-none focus:border-ink font-bold"
+                          />
+                       </div>
+                       <div className="space-y-1">
+                          <label className="text-[9px] font-bold uppercase text-muted tracking-widest">Message</label>
+                          <textarea 
+                            value={commMessage}
+                            onChange={e => setCommMessage(e.target.value)}
+                            placeholder="Write your message here..."
+                            className="w-full p-3 border border-border bg-paper text-sm outline-none focus:border-ink h-48 leading-relaxed"
+                          />
+                       </div>
+                       <div className="grid grid-cols-2 gap-2">
+                          {[
+                            { label: "Approved", sub: "Photo accepted", msg: "Dobrý deň,\n\nVaša fotografia bola schválená do užšieho výberu.\n\nCongratulations, your photo has been shortlisted." },
+                            { label: "Re-upload", sub: "Technical issue", msg: "Dobrý deň,\n\nVaša fotografia nespĺňa technické parametre (rozlíšenie). Prosím, nahrajte ju znova v lepšej kvalite.\n\nYour photo does not meet the technical requirements. Please re-upload in better quality." }
+                          ].map(tpl => (
+                            <button 
+                              key={tpl.label}
+                              onClick={() => { setCommSubject(tpl.sub); setCommMessage(tpl.msg); }}
+                              className="p-2 border border-border text-[9px] font-bold uppercase tracking-widest hover:bg-paper transition-all"
+                            >
+                              {tpl.label}
+                            </button>
+                          ))}
+                       </div>
+                    </div>
+
+                    <div className="flex gap-4 pt-4">
+                       <button 
+                        onClick={() => setCommModal({ open: false, email: "", photoId: "" })} 
+                        className="flex-1 py-3 border border-border text-[10px] font-bold uppercase tracking-widest hover:bg-paper transition-all"
+                       >
+                         {lang === "sk" ? "Zrušiť" : "Cancel"}
+                       </button>
+                       <button 
+                        onClick={sendCommunication}
+                        disabled={commStatus === "sending"}
+                        className="flex-1 py-3 bg-accent text-white text-[10px] font-bold uppercase tracking-widest hover:opacity-90 transition-all disabled:opacity-50"
+                       >
+                         {commStatus === "sending" ? "..." : (lang === "sk" ? "Odoslať email" : "Send Email")}
+                       </button>
+                    </div>
+
+                    {commStatus === "success" && <p className="text-[10px] font-bold text-green-600 text-center uppercase tracking-widest">Email sent successfully!</p>}
+                    {commStatus === "error" && <p className="text-[10px] font-bold text-red-600 text-center uppercase tracking-widest">Failed to send email.</p>}
+                  </motion.div>
+                </motion.div>
+              )}
+
+              {editingPhoto && (
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-ink/90 backdrop-blur-md"
+                >
+                   <motion.div 
+                    initial={{ scale: 0.95, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.95, opacity: 0 }}
+                    className="bg-white max-w-lg w-full p-10 space-y-8 shadow-2xl relative"
+                  >
+                    <button onClick={() => setEditingPhoto(null)} className="absolute top-6 right-6 text-muted hover:text-ink">
+                      <X size={24} />
+                    </button>
+
+                    <div className="space-y-2">
+                       <p className="text-accent text-[11px] font-bold uppercase tracking-[2px]">{lang === "sk" ? "Editácia záznamu" : "Edit Record"}</p>
+                       <h3 className="text-2xl font-light tracking-tight">{editingPhoto.name}</h3>
+                    </div>
+
+                    <div className="space-y-4">
+                       <div className="space-y-1">
+                          <label className="text-[9px] font-bold uppercase text-muted tracking-widest">Author</label>
+                          <input 
+                            type="text" 
+                            value={editingPhoto.author}
+                            onChange={e => setEditingPhoto({...editingPhoto, author: e.target.value})}
+                            className="w-full p-3 border border-border bg-paper text-sm outline-none focus:border-ink"
+                          />
+                       </div>
+                       <div className="space-y-1">
+                          <label className="text-[9px] font-bold uppercase text-muted tracking-widest">Email</label>
+                          <input 
+                            type="email" 
+                            value={editingPhoto.email}
+                            onChange={e => setEditingPhoto({...editingPhoto, email: e.target.value})}
+                            className="w-full p-3 border border-border bg-paper text-sm outline-none focus:border-ink"
+                          />
+                       </div>
+                       <div className="space-y-1">
+                          <label className="text-[9px] font-bold uppercase text-muted tracking-widest">Piece Name</label>
+                          <input 
+                            type="text" 
+                            value={editingPhoto.name}
+                            onChange={e => setEditingPhoto({...editingPhoto, name: e.target.value})}
+                            className="w-full p-3 border border-border bg-paper text-sm outline-none focus:border-ink"
+                          />
+                       </div>
+                       <div className="space-y-1">
+                          <label className="text-[9px] font-bold uppercase text-muted tracking-widest">Category</label>
+                          <select 
+                            value={editingPhoto.category}
+                            onChange={e => setEditingPhoto({...editingPhoto, category: e.target.value})}
+                            className="w-full p-3 border border-border bg-paper text-sm outline-none focus:border-ink"
+                          >
+                            {settings.categories.map(cat => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
+                          </select>
+                       </div>
+                       <div className="space-y-1">
+                          <label className="text-[9px] font-bold uppercase text-muted tracking-widest">Description</label>
+                          <textarea 
+                            value={editingPhoto.description}
+                            onChange={e => setEditingPhoto({...editingPhoto, description: e.target.value})}
+                            className="w-full p-3 border border-border bg-paper text-sm outline-none focus:border-ink h-32"
+                          />
+                       </div>
+                    </div>
+
+                    <div className="flex gap-4 pt-4">
+                       <button 
+                        onClick={() => setEditingPhoto(null)} 
+                        className="flex-1 py-3 border border-border text-[10px] font-bold uppercase tracking-widest hover:bg-paper transition-all"
+                       >
+                         {lang === "sk" ? "Zrušiť" : "Cancel"}
+                       </button>
+                       <button 
+                        onClick={() => updatePhoto(editingPhoto.id, {
+                          author: editingPhoto.author,
+                          email: editingPhoto.email,
+                          name: editingPhoto.name,
+                          category: editingPhoto.category,
+                          description: editingPhoto.description
+                        })}
+                        disabled={isUpdating}
+                        className="flex-1 py-3 bg-ink text-white text-[10px] font-bold uppercase tracking-widest hover:opacity-90 transition-all disabled:opacity-50"
+                       >
+                         {isUpdating ? "..." : (lang === "sk" ? "Uložiť zmeny" : "Save Changes")}
+                       </button>
+                    </div>
+                  </motion.div>
+                </motion.div>
+              )}
+
+              {selectedPhoto && (
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-ink/90 backdrop-blur-md"
+                  onClick={() => setSelectedPhoto(null)}
+                >
+                  <motion.div 
+                    initial={{ scale: 0.95, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.95, opacity: 0 }}
+                    onClick={e => e.stopPropagation()}
+                    className="bg-white max-w-5xl w-full max-h-[90vh] overflow-y-auto flex flex-col md:flex-row shadow-2xl"
+                  >
+                    <div className="md:w-3/5 bg-paper p-4 flex items-center justify-center">
+                      <img 
+                        src={`/uploads/${selectedPhoto.webPath || selectedPhoto.path}`} 
+                        className="max-w-full max-h-[70vh] shadow-xl" 
+                        alt="" 
+                      />
+                    </div>
+                    <div className="md:w-2/5 p-10 space-y-8 flex flex-col justify-between">
+                      <div className="space-y-6">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <p className="text-accent text-[11px] font-bold uppercase tracking-[2px] mb-1">{selectedPhoto.category}</p>
+                            <h3 className="text-2xl font-light tracking-tight">{selectedPhoto.name}</h3>
+                          </div>
+                          <button onClick={() => setSelectedPhoto(null)} className="text-muted hover:text-ink">
+                            <X size={24} />
+                          </button>
+                        </div>
+
+                        <div className="space-y-4">
+                          <div className="flex items-center gap-3">
+                            <User size={16} className="text-muted" />
+                            <div>
+                              <p className="text-[9px] text-muted uppercase font-bold tracking-widest">{lang === "sk" ? "Autor" : "Author"}</p>
+                              <p className="text-sm font-bold">{selectedPhoto.author}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <Mail size={16} className="text-muted" />
+                            <div>
+                              <p className="text-[9px] text-muted uppercase font-bold tracking-widest">Email</p>
+                              <p className="text-sm">{selectedPhoto.email}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <ImageIcon size={16} className="text-muted" />
+                            <div>
+                              <p className="text-[9px] text-muted uppercase font-bold tracking-widest">{lang === "sk" ? "Dátum nahratia" : "Upload Date"}</p>
+                              <p className="text-sm">{new Date(selectedPhoto.createdAt).toLocaleString(lang === "sk" ? "sk-SK" : "en-US")}</p>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2 border-t border-border pt-6">
+                          <p className="text-[9px] text-muted uppercase font-bold tracking-widest">{lang === "sk" ? "Popis / Príbeh" : "Description / Story"}</p>
+                          <p className="text-xs text-muted leading-relaxed whitespace-pre-wrap">{selectedPhoto.description || "No description provided."}</p>
+                        </div>
+
+                        {selectedPhoto.metadata && (
+                          <div className="space-y-2 border-t border-border pt-6">
+                             <p className="text-[9px] text-muted uppercase font-bold tracking-widest">EXIF / Technical</p>
+                             <div className="grid grid-cols-2 gap-4">
+                               {selectedPhoto.metadata.camera && (
+                                 <div>
+                                   <p className="text-[8px] text-muted uppercase font-bold">Camera</p>
+                                   <p className="text-[10px] font-bold">{selectedPhoto.metadata.camera}</p>
+                                 </div>
+                               )}
+                               {selectedPhoto.metadata.settings && (
+                                 <div>
+                                   <p className="text-[8px] text-muted uppercase font-bold">Settings</p>
+                                   <p className="text-[10px] font-bold">{selectedPhoto.metadata.settings}</p>
+                                 </div>
+                               )}
+                               {selectedPhoto.metadata.width && (
+                                 <div>
+                                   <p className="text-[8px] text-muted uppercase font-bold">Resolution</p>
+                                   <p className="text-[10px] font-bold">{selectedPhoto.metadata.width} x {selectedPhoto.metadata.height}</p>
+                                 </div>
+                               )}
+                             </div>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="pt-6 flex gap-4">
+                        <a 
+                          href={`/uploads/${selectedPhoto.originalPath}`} 
+                          download 
+                          className="flex-1 py-3 border border-ink text-ink text-center text-[10px] font-bold uppercase tracking-widest hover:bg-ink hover:text-white transition-all"
+                        >
+                          {lang === "sk" ? "Stiahnuť originál" : "Download Original"}
+                        </a>
+                        <button 
+                          onClick={() => { setSelectedPhoto(null); deletePhoto(selectedPhoto.id); }}
+                          className="px-6 py-3 bg-red-500 text-white hover:bg-red-600 transition-colors"
+                          title={lang === "sk" ? "Zmazať" : "Delete"}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         )}
 

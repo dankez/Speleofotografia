@@ -12,6 +12,25 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
   const [error, setError] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [success, setSuccess] = useState(false);
+  const [existingCounts, setExistingCounts] = useState<Record<string, number>>({});
+  const [debugLoading, setDebugLoading] = useState(false);
+
+  const generateTestData = async () => {
+    if (!settings?.debugMode) return;
+    setDebugLoading(true);
+    try {
+      const res = await fetch("/api/admin/generate-test-data", { method: "POST" });
+      if (res.ok) {
+        setSuccess(true);
+      } else {
+        alert("Failed to generate test data");
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setDebugLoading(false);
+    }
+  };
   
   const [formData, setFormData] = useState<Omit<Registration, "photos">>({
     author: "",
@@ -55,6 +74,24 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
       rules: formData.rulesConsent,
     };
   }, [formData, settings]);
+
+  useEffect(() => {
+    if (isValid.email) {
+      const timer = setTimeout(async () => {
+        try {
+          const res = await fetch(`/api/check-uploads?email=${encodeURIComponent(formData.email)}`);
+          if (!res.ok) throw new Error("Network response was not ok");
+          const data = await res.json();
+          setExistingCounts(data || {});
+        } catch (e) {
+          console.error("Error checking existing uploads", e);
+        }
+      }, 500);
+      return () => clearTimeout(timer);
+    } else {
+      setExistingCounts({});
+    }
+  }, [formData.email, isValid.email]);
 
   const [photos, setPhotos] = useState<PhotoInfo[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -171,25 +208,6 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
     });
   };
 
-  const loadTestPhotos = () => {
-    const mockPhotos: PhotoInfo[] = Array.from({ length: 5 }).map((_, i) => ({
-      name: `Svadobná sieň ${i + 1}`,
-      category: i < 3 ? "A" : "B",
-      description: `Testovacia fotografia pre porotu. Zobrazenie krásy podzemia v roku 2025.`,
-      previewUrl: `https://picsum.photos/seed/${i + 50}/800/800`
-    }));
-    setPhotos(mockPhotos);
-    setFormData({
-      author: "Michal Danko",
-      email: "michal.danko@gmail.com",
-      webpage: "https://michaldanko.sk",
-      address: "Demänovská dolina 10, Liptovský Mikuláš",
-      instagram: "@michal.danko",
-      gdprConsent: true,
-      rulesConsent: true,
-    });
-  };
-
   const handleSubmit = async () => {
     const errors: string[] = [];
     const req = settings?.fieldRequirements;
@@ -214,8 +232,14 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
 
     const maxPhotos = parseInt(settings?.maxPhotosPerCategory || "5");
     (settings?.categories || []).forEach(cat => {
-      if ((catCounts[cat.id] || 0) > maxPhotos) {
-        errors.push(`${lang === "sk" ? "Limit prekročený v kategorii" : "Limit exceeded in category"} ${cat.name || cat.id} (${catCounts[cat.id]}/${maxPhotos})`);
+      const existing = existingCounts[cat.id] || 0;
+      const current = catCounts[cat.id] || 0;
+      if (existing + current > maxPhotos) {
+        if (existing > 0) {
+          errors.push(`${lang === "sk" ? "Limit prekročený. Už ste nahrali" : "Limit exceeded. You already uploaded"} ${existing} ${lang === "sk" ? "fotiek v kategórii" : "photos in category"} ${cat.name || cat.id}. ${lang === "sk" ? "Môžete pridať už len" : "You can only add"} ${maxPhotos - existing}.`);
+        } else {
+          errors.push(`${lang === "sk" ? "Limit prekročený v kategorii" : "Limit exceeded in category"} ${cat.name || cat.id} (${current}/${maxPhotos})`);
+        }
       }
     });
 
@@ -337,13 +361,16 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
           </p>
           <h2 className="text-3xl font-light tracking-tight">{lang === "sk" ? "Prihláška" : "Application Form"}</h2>
         </div>
-        <button 
-          onClick={loadTestPhotos}
-          className="flex items-center gap-2 px-4 py-2 border border-border text-[10px] font-bold uppercase tracking-widest text-muted hover:bg-paper hover:text-ink transition-all"
-        >
-          <FlaskConical size={14} className="text-accent" />
-          {lang === "sk" ? "Nahrať testovacie dáta" : "Load Test Data"}
-        </button>
+        {settings?.debugMode && (
+          <button 
+            onClick={generateTestData}
+            disabled={debugLoading}
+            className="flex items-center gap-2 px-4 py-2 border border-accent/20 bg-accent/5 text-[10px] font-bold uppercase tracking-widest text-accent hover:bg-accent/10 transition-all disabled:opacity-50"
+          >
+            {debugLoading ? <Loader2 className="animate-spin" size={14} /> : <FlaskConical size={14} />}
+            {lang === "sk" ? "Nahrať testovacie dáta (ADMIN)" : "Upload Test Data (ADMIN)"}
+          </button>
+        )}
       </div>
 
       {/* Main Form Content */}
@@ -474,11 +501,12 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
                   </div>
                   <span className={cn(
                     "text-[9px] font-bold px-2 py-0.5 rounded-full",
-                    catPhotos.length > parseInt(settings?.maxPhotosPerCategory || "5") 
+                    (existingCounts[cat.id] || 0) + catPhotos.length > parseInt(settings?.maxPhotosPerCategory || "5") 
                       ? "bg-red-100 text-red-600" 
-                      : "bg-ink/5 text-muted"
+                      : (existingCounts[cat.id] || 0) > 0 ? "bg-accent/10 text-accent" : "bg-ink/5 text-muted"
                   )}>
-                    {catPhotos.length}/{settings?.maxPhotosPerCategory || 5}
+                    {(existingCounts[cat.id] || 0) + catPhotos.length}/{settings?.maxPhotosPerCategory || 5}
+                    {(existingCounts[cat.id] || 0) > 0 && ` (${lang === "sk" ? "z toho" : "incl."} ${existingCounts[cat.id]} ${lang === "sk" ? "pôvodných" : "previous"})`}
                   </span>
                 </div>
 
