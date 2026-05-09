@@ -22,6 +22,10 @@ export interface Settings {
   museumName: string;
   edition: string;
   contestStatus: "submissions" | "review" | "judging" | "shortlist" | "results";
+  submissionStart?: string;
+  submissionEnd?: string;
+  judgingStart?: string;
+  judgingEnd?: string;
   categories: { id: string, name: string }[];
   fieldRequirements: {
     author: boolean;
@@ -84,6 +88,42 @@ export default function App() {
     { id: "home", label: lang === "sk" ? "Prihláška / Form" : "Registration / Form", icon: Camera },
     { id: "admin", label: lang === "sk" ? "Admin / Kontrola" : "Admin / Control", icon: Shield },
   ];
+
+  const isSubmissionActive = () => {
+    if (!settings) return false;
+    if (settings.contestStatus !== "submissions") return false;
+    
+    const now = new Date();
+    if (settings.submissionStart) {
+      const start = new Date(settings.submissionStart);
+      if (now < start) return false;
+    }
+    if (settings.submissionEnd) {
+      const end = new Date(settings.submissionEnd);
+      // Set to end of the day
+      end.setHours(23, 59, 59, 999);
+      if (now > end) return false;
+    }
+    return true;
+  };
+
+  const isJudgingActive = () => {
+    if (!settings) return false;
+    // For judging we check judging status or shortlist or whatever
+    if (!["review", "judging", "shortlist"].includes(settings.contestStatus)) return false;
+    
+    const now = new Date();
+    if (settings.judgingStart) {
+      const start = new Date(settings.judgingStart);
+      if (now < start) return false;
+    }
+    if (settings.judgingEnd) {
+      const end = new Date(settings.judgingEnd);
+      end.setHours(23, 59, 59, 999);
+      if (now > end) return false;
+    }
+    return true;
+  };
 
   return (
     <div className="flex h-screen bg-paper text-ink font-sans selection:bg-ink selection:text-paper overflow-hidden">
@@ -184,7 +224,7 @@ export default function App() {
                     exit={{ opacity: 0 }}
                     transition={{ duration: 0.2 }}
                   >
-                    {settings?.contestStatus === "submissions" ? (
+                    {isSubmissionActive() ? (
                       <RegistrationForm lang={lang} settings={settings} />
                     ) : (
                       <div className="flex flex-col items-center justify-center p-20 bg-paper border border-border space-y-6 text-center">
@@ -197,8 +237,12 @@ export default function App() {
                           </h2>
                           <p className="text-[11px] uppercase font-bold tracking-widest text-muted max-w-xs mx-auto">
                             {lang === "sk" 
-                              ? "Termín na odosielanie fotografií už uplynul. Sledujte náš web pre výsledky." 
-                              : "The deadline for photo submissions has passed. Follow our website for results."}
+                              ? (settings?.submissionStart && new Date(settings.submissionStart) > new Date()
+                                  ? `Prihlasovanie sa začne ${new Date(settings.submissionStart).toLocaleDateString()}.`
+                                  : "Termín na odosielanie fotografií už uplynul. Sledujte náš web pre výsledky.")
+                              : (settings?.submissionStart && new Date(settings.submissionStart) > new Date()
+                                  ? `Submissions will open on ${new Date(settings.submissionStart).toLocaleDateString()}.`
+                                  : "The deadline for photo submissions has passed. Follow our website for results.")}
                           </p>
                         </div>
                         <button 

@@ -118,6 +118,10 @@ const DEFAULT_SETTINGS = {
   museumName: "Slovenské múzeum ochrany prírody a jaskyniarstva",
   edition: "23. ročník",
   contestStatus: "submissions",
+  submissionStart: "",
+  submissionEnd: "",
+  judgingStart: "",
+  judgingEnd: "",
   categories: [
     { id: "A", name: "Krása jaskýň / Cave Beauty" },
     { id: "B", name: "Speleomoment / Speleomoment" }

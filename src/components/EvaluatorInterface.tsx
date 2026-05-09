@@ -126,6 +126,24 @@ export default function EvaluatorInterface({ evalId, lang }: Props) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
 
+  const isJudgingActive = () => {
+    if (!settings) return false;
+    // For judging we check judging status or shortlist or whatever
+    if (!["review", "judging", "shortlist"].includes(settings.contestStatus)) return false;
+    
+    const now = new Date();
+    if (settings.judgingStart) {
+      const start = new Date(settings.judgingStart);
+      if (now < start) return false;
+    }
+    if (settings.judgingEnd) {
+      const end = new Date(settings.judgingEnd);
+      end.setHours(23, 59, 59, 999);
+      if (now > end) return false;
+    }
+    return true;
+  };
+
   if (loading) return (
     <div className="flex flex-col items-center justify-center h-[60vh] gap-4">
       <Loader2 className="animate-spin text-accent" size={40} />
@@ -136,6 +154,8 @@ export default function EvaluatorInterface({ evalId, lang }: Props) {
   );
 
   if (!selectedCategory) {
+    const judgingOpen = isJudgingActive();
+
     return (
       <div className="max-w-4xl mx-auto py-12 space-y-12">
         <div className="text-center space-y-4">
@@ -143,9 +163,26 @@ export default function EvaluatorInterface({ evalId, lang }: Props) {
             {lang === "sk" ? "Výber kategórie na hodnotenie" : "Select Category to Evaluate"}
           </p>
           <h2 className="text-5xl font-light tracking-tighter uppercase">{evaluatorName}</h2>
+          
+          {!judgingOpen && settings && (
+            <div className="mt-8 p-6 border border-accent bg-accent/5 max-w-lg mx-auto">
+              <p className="text-xs uppercase font-bold tracking-widest text-accent">
+                {lang === "sk" ? "Bodovanie momentálne nie je aktívne" : "Judging is currently not active"}
+              </p>
+              <p className="text-[11px] text-muted mt-2 font-bold uppercase">
+                {lang === "sk" 
+                  ? (settings.judgingStart && new Date(settings.judgingStart) > new Date()
+                      ? `Hodnotenie sa začne ${new Date(settings.judgingStart).toLocaleDateString()}.`
+                      : "Termín na hodnotenie už uplynul.")
+                  : (settings.judgingStart && new Date(settings.judgingStart) > new Date()
+                      ? `Judging will open on ${new Date(settings.judgingStart).toLocaleDateString()}.`
+                      : "The deadline for judging has passed.")}
+              </p>
+            </div>
+          )}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+        <div className={cn("grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8", !judgingOpen && "opacity-40 pointer-events-none")}>
           {(settings?.categories || []).map(cat => (
             <button
               key={cat.id}

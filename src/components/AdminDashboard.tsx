@@ -10,6 +10,10 @@ interface ContestSettings {
   museumName: string;
   edition: string;
   contestStatus: "submissions" | "review" | "judging" | "shortlist" | "results";
+  submissionStart?: string;
+  submissionEnd?: string;
+  judgingStart?: string;
+  judgingEnd?: string;
   categories: { id: string, name: string }[];
   fieldRequirements: {
     author: boolean;
@@ -47,6 +51,10 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
     museumName: "",
     edition: "",
     contestStatus: "submissions",
+    submissionStart: "",
+    submissionEnd: "",
+    judgingStart: "",
+    judgingEnd: "",
     categories: [],
     fieldRequirements: {
       author: true,
@@ -523,6 +531,7 @@ Vyhlásenie výsledkov: November 2026, SMOPaJ Liptovský Mikuláš.`,
                   </select>
                 </div>
                 <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase text-muted">Contest Name</label>
                   <input 
                     type="text" 
                     value={settings.contestName}
@@ -530,6 +539,57 @@ Vyhlásenie výsledkov: November 2026, SMOPaJ Liptovský Mikuláš.`,
                     className="w-full p-3 border border-border bg-white text-sm outline-none focus:border-ink"
                   />
                 </div>
+
+                {/* Date Ranges */}
+                <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-border">
+                  <div className="space-y-4">
+                    <h4 className="text-[9px] font-bold uppercase tracking-widest text-muted">Submission Period (Prihlášky)</h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="text-[8px] font-bold uppercase text-muted block">From / Od</label>
+                        <input 
+                          type="date" 
+                          value={settings.submissionStart?.split('T')[0] || ""}
+                          onChange={e => setSettings({ ...settings, submissionStart: e.target.value })}
+                          className="w-full p-2 border border-border bg-white text-xs outline-none focus:border-ink"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[8px] font-bold uppercase text-muted block">To / Do</label>
+                        <input 
+                          type="date" 
+                          value={settings.submissionEnd?.split('T')[0] || ""}
+                          onChange={e => setSettings({ ...settings, submissionEnd: e.target.value })}
+                          className="w-full p-2 border border-border bg-white text-xs outline-none focus:border-ink"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="space-y-4">
+                    <h4 className="text-[9px] font-bold uppercase tracking-widest text-muted">Judging Period (Hodnotenie)</h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="text-[8px] font-bold uppercase text-muted block">From / Od</label>
+                        <input 
+                          type="date" 
+                          value={settings.judgingStart?.split('T')[0] || ""}
+                          onChange={e => setSettings({ ...settings, judgingStart: e.target.value })}
+                          className="w-full p-2 border border-border bg-white text-xs outline-none focus:border-ink"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[8px] font-bold uppercase text-muted block">To / Do</label>
+                        <input 
+                          type="date" 
+                          value={settings.judgingEnd?.split('T')[0] || ""}
+                          onChange={e => setSettings({ ...settings, judgingEnd: e.target.value })}
+                          className="w-full p-2 border border-border bg-white text-xs outline-none focus:border-ink"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold uppercase text-muted">Edition</label>
                   <input 
