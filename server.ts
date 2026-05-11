@@ -9,6 +9,7 @@ import exif from "exif-reader";
 import { ZipArchive } from "archiver";
 import { v4 as uuidv4 } from "uuid";
 import { fileURLToPath } from "url";
+import "dotenv/config";
 
 console.log("Modules loaded");
 
@@ -110,6 +111,23 @@ async function startServer() {
   });
 
 const SETTINGS_JSON = path.join(DATA_DIR, "settings.json");
+
+const getTransporter = (settings: any) => {
+  const host = process.env.SMTP_HOST || settings.smtpHost;
+  const port = parseInt(process.env.SMTP_PORT || settings.smtpPort);
+  const secure = (process.env.SMTP_SECURE || settings.smtpSecure) === "true";
+  const user = process.env.SMTP_USER || settings.smtpUser;
+  const pass = process.env.SMTP_PASS || settings.smtpPass;
+
+  if (!user || !pass || !host) return null;
+
+  return nodemailer.createTransport({
+    host,
+    port,
+    secure,
+    auth: { user, pass },
+  });
+};
 
 // Default settings
 const DEFAULT_SETTINGS = {
@@ -328,14 +346,9 @@ app.post("/api/admin/login", (req, res) => {
       fs.writeFileSync(INVITATIONS_JSON, JSON.stringify(invitations, null, 2));
 
       // Send email
-      if (settings.smtpUser && settings.smtpPass) {
-        console.log(`Sending invitation email to ${email} via ${settings.smtpHost}`);
-        const transporter = nodemailer.createTransport({
-          host: settings.smtpHost,
-          port: parseInt(settings.smtpPort),
-          secure: settings.smtpSecure === "true",
-          auth: { user: settings.smtpUser, pass: settings.smtpPass },
-        });
+      const transporter = getTransporter(settings);
+      if (transporter) {
+        console.log(`Sending invitation email to ${email}`);
 
         const protocol = req.headers["x-forwarded-proto"] || req.protocol;
         const host = req.headers["x-forwarded-host"] || req.get("host");
@@ -394,14 +407,9 @@ app.post("/api/admin/login", (req, res) => {
       invitations.push({ email, token, type: "reset", createdAt: new Date().toISOString() });
       fs.writeFileSync(INVITATIONS_JSON, JSON.stringify(invitations, null, 2));
 
-      if (settings.smtpUser && settings.smtpPass) {
-        console.log(`Attempting to send reset email to ${email} via ${settings.smtpHost}:${settings.smtpPort}`);
-        const transporter = nodemailer.createTransport({
-          host: settings.smtpHost,
-          port: parseInt(settings.smtpPort),
-          secure: settings.smtpSecure === "true",
-          auth: { user: settings.smtpUser, pass: settings.smtpPass },
-        });
+      const transporter = getTransporter(settings);
+      if (transporter) {
+        console.log(`Attempting to send reset email to ${email}`);
 
         const protocol = req.headers["x-forwarded-proto"] || req.protocol;
         const host = req.headers["x-forwarded-host"] || req.get("host");
@@ -622,21 +630,12 @@ app.post("/api/admin/login", (req, res) => {
       const sendEmail = async () => {
         try {
           const settings = JSON.parse(fs.readFileSync(SETTINGS_JSON, "utf8"));
+          const transporter = getTransporter(settings);
           
-          if (!settings.smtpUser || !settings.smtpPass) {
-            console.warn("SMTP credentials not configured in settings. Skipping email.");
+          if (!transporter) {
+            console.warn("SMTP credentials not configured. Skipping email.");
             return;
           }
-
-          const transporter = nodemailer.createTransport({
-            host: settings.smtpHost,
-            port: parseInt(settings.smtpPort),
-            secure: settings.smtpSecure === "true",
-            auth: {
-              user: settings.smtpUser,
-              pass: settings.smtpPass,
-            },
-          });
 
           await transporter.sendMail({
             from: `"${settings.contestName}" <${settings.emailFrom}>`,
@@ -858,16 +857,11 @@ app.post("/api/admin/login", (req, res) => {
       const { email, subject, message } = req.body;
       const settings = JSON.parse(fs.readFileSync(SETTINGS_JSON, "utf8"));
       
-      if (!settings.smtpUser || !settings.smtpPass) {
+      const transporter = getTransporter(settings);
+      
+      if (!transporter) {
         return res.status(400).json({ error: "SMTP credentials not configured" });
       }
-
-      const transporter = nodemailer.createTransport({
-        host: settings.smtpHost,
-        port: parseInt(settings.smtpPort),
-        secure: settings.smtpSecure === "true",
-        auth: { user: settings.smtpUser, pass: settings.smtpPass },
-      });
 
       await transporter.sendMail({
         from: `"${settings.contestName}" <${settings.emailFrom}>`,

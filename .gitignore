@@ -8,7 +8,6 @@ coverage/
 !.env.example
 data/*.csv
 data/*.json
-!data/settings.json
 uploads/
 graphify-out/
 .gemini/
