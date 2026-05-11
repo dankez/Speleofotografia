@@ -1,20 +1,22 @@
-import { useState, useEffect, ChangeEvent } from "react";
-import { BarChart3, Users, Image as ImageIcon, Link as LinkIcon, Plus, Copy, Check, Download, Trash2, Eye, Shield, Settings as SettingsIcon, Mail, UserPlus, Heart, Code, ExternalLink, X, User, LayoutGrid, List, Search, Edit2 } from "lucide-react";
+import { useState, useEffect, useMemo, ChangeEvent } from "react";
+import { BarChart3, Users, Image as ImageIcon, Link as LinkIcon, Plus, Copy, Check, Download, Trash2, Eye, Shield, Settings as SettingsIcon, Mail, UserPlus, Heart, Code, ExternalLink, X, User, LayoutGrid, List, Search, Edit2, TrendingUp, Activity, FileText, Zap, Upload, AlertTriangle } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/src/lib/utils";
 import type { Photo, Evaluator } from "../types";
 import { Lang, Settings } from "../App";
 
 interface ContestSettings {
-  contestName: string;
-  museumName: string;
+  contestNameSk: string;
+  contestNameEn: string;
+  museumNameSk: string;
+  museumNameEn: string;
   edition: string;
   contestStatus: "submissions" | "review" | "judging" | "shortlist" | "results";
   submissionStart?: string;
   submissionEnd?: string;
   judgingStart?: string;
   judgingEnd?: string;
-  categories: { id: string, name: string }[];
+  categories: { id: string, nameSk: string, nameEn: string }[];
   fieldRequirements: {
     author: boolean;
     email: boolean;
@@ -42,77 +44,74 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [evaluators, setEvaluators] = useState<Evaluator[]>([]);
   const [stats, setStats] = useState<any>({ total: 0, uniqueEmails: 0 });
+  const [dashboardStats, setDashboardStats] = useState<any>(null);
   const [newEvalName, setNewEvalName] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"stats" | "photos" | "evaluators" | "embed" | "settings">("stats");
+  const [activeTab, setActiveTab] = useState<"stats" | "photos" | "evaluators" | "embed" | "settings" | "stress">("stats");
+  const [stressStatus, setStressStatus] = useState<"idle" | "uploading" | "success" | "error">("idle");
+  const [stressResults, setStressResults] = useState<{ count: number, details: any[] } | null>(null);
+  const [selectedPhotos, setSelectedPhotos] = useState<string[]>([]);
   const [settings, setSettings] = useState<ContestSettings>({
-    contestName: "",
-    museumName: "",
-    edition: "",
-    contestStatus: "submissions",
-    submissionStart: "",
-    submissionEnd: "",
-    judgingStart: "",
-    judgingEnd: "",
-    categories: [],
-    fieldRequirements: {
-      author: true,
-      email: true,
-      instagram: false,
-      address: true
-    },
+    contestNameSk: "",
+    contestNameEn: "",
+    museumNameSk: "",
+    museumNameEn: "",
+    contestYear: "",
     rulesSk: "",
     rulesEn: "",
-    rulesText: `SPELEOFOTOGRAFIA 2026
-23. ročník medzinárodnej súťažnej výstavy fotografií s jaskyniarskou tematikou
-
-1. Organizátori
-Slovenská speleologická spoločnosť
-Štátna ochrana prírody SR – Správa slovenských jaskýň
-Slovenské múzeum ochrany prírody a jaskyniarstva
-Mesto Liptovský Mikuláš
-
-2. Podmienky účasti
-Súťaže sa môže zúčastniť každý fotograf, ktorý splní podmienky týchto propozícií.
-Účasť v súťaži je bezplatná.
-Každý autor môže do jednej kategórie zaslať najviac 5 fotografií.
-Členovia poroty a organizátori sú z účasti v súťaži vylúčení.
-
-3. Súťažné kategórie a ceny
-Kategória A: Fotografia s príbehom – snímky znázorňujúce kras, jaskyne a jaskyniarov doplnené textovým príbehom v rozsahu do 5 000 znakov.
-Kategória B: Speleomoment – reportážna fotografia z jaskyniarskych akcií a expedícií.
-
-Ocenenia:
-V každej kategórii budú ocenené 3 najlepšie práce.
-Hlavná cena Speleofotografie 2026: Absolútny víťaz 23. ročníka vybraný odbornou porotou.
-Cena verejnosti: Na základe hlasovania na sociálnych sieťach.
-
-4. Technické parametre a spôsob prihlásenia
-Súťaž prebieha plne digitálne cez online formulár. Zasielanie prác e-mailom nie je akceptované.
-Technické požiadavky: Minimálne 3 000 px na dlhšej strane, formát .jpg, maximálna veľkosť súboru 5 MB.
-Jazyk: Názvy fotografií a sprievodné informácie musia byť v anglickom jazyku. Príbeh ku kategórii A môže byť v slovenskom alebo anglickom jazyku.
-
-5. Právne ustanovenia (Autorské práva a GDPR)
-Autorské práva: Účastník odoslaním formulára potvrdzuje, že je autorom diel. Autor udeľuje organizátorom súhlas na bezodplatné použitie fotografií na propagáciu súťaže.
-GDPR: Osobné údaje sú spracúvané výhradne za účelom realizácie súťaže v zmysle Nariadenia (EÚ) 2016/679.
-
-6. Harmonogram a porota
-Uzávierka prihlášok: 15. september 2026.
-Zloženie poroty: Pavol Kočiš (SK – predseda), Marek Audy (CZ), Cosmin Berghean (RO), Daniel Lee (RU), Pavol Staník (SK), Lukáš Kubičina (SK).
-Vyhlásenie výsledkov: November 2026, SMOPaJ Liptovský Mikuláš.`,
-    maxPhotosPerCategory: "5",
-    watermarkTemplate: "",
-    logoUrl: "",
-    smtpHost: "",
-    smtpPort: "",
-    smtpSecure: "false",
-    smtpUser: "",
-    smtpPass: "",
-    emailFrom: "",
-    adminEmail: "",
-    adminPass: "",
+    categories: [],
+    debugMode: false,
+    googleAnalyticsId: ""
   });
+
+  const toggleSelectPhoto = (id: string) => {
+    setSelectedPhotos(prev => 
+      prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]
+    );
+  };
+
+  const selectAllPhotos = () => {
+    const ids = filteredPhotos.map(p => p.id);
+    if (selectedPhotos.length === ids.length && ids.length > 0) {
+      setSelectedPhotos([]);
+    } else {
+      setSelectedPhotos(ids);
+    }
+  };
+
+  const deleteSelected = async () => {
+    if (!selectedPhotos.length) return;
+    if (!confirm(lang === "sk" ? `Naozaj chcete zmazať ${selectedPhotos.length} vybraných fotografií?` : `Do you really want to delete ${selectedPhotos.length} selected photos?`)) return;
+
+    try {
+      const res = await fetch("/api/admin/photos/bulk-delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: selectedPhotos })
+      });
+      if (res.ok) {
+        setSelectedPhotos([]);
+        fetchData();
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const deleteAll = async () => {
+    if (!confirm(lang === "sk" ? "VAROVANIE: Naozaj chcete zmazať ÚPLNE VŠETKY fotografie v súťaži?" : "WARNING: Do you really want to delete ALL photos in the contest?")) return;
+
+    try {
+      const res = await fetch("/api/admin/photos/delete-all", { method: "POST" });
+      if (res.ok) {
+        setSelectedPhotos([]);
+        fetchData();
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
   const [adminList, setAdminList] = useState<any[]>([]);
   const [publicResults, setPublicResults] = useState<Record<string, number>>({});
   const [inviteEmail, setInviteEmail] = useState("");
@@ -135,6 +134,24 @@ Vyhlásenie výsledkov: November 2026, SMOPaJ Liptovský Mikuláš.`,
   const [authError, setAuthError] = useState("");
   const [resetView, setResetView] = useState(false);
   const [resetStatus, setResetStatus] = useState<"idle" | "sending" | "success" | "error">("idle");
+  
+  const filteredPhotos = useMemo(() => {
+    return photos
+      .filter(p => {
+        const author = (p.author || "").toLowerCase();
+        const name = (p.name || "").toLowerCase();
+        const query = (searchQuery || "").toLowerCase();
+        const matchesSearch = author.includes(query) || name.includes(query);
+        const matchesCategory = photoFilter === "all" || p.category === photoFilter;
+        return matchesSearch && matchesCategory;
+      })
+      .sort((a, b) => {
+        if (galleryView === "table") {
+          return (b.averageScore || 0) - (a.averageScore || 0);
+        }
+        return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+      });
+  }, [photos, photoFilter, searchQuery, galleryView]);
 
   useEffect(() => {
     if (isAuthorized) {
@@ -237,16 +254,78 @@ Vyhlásenie výsledkov: November 2026, SMOPaJ Liptovský Mikuláš.`,
     }
   };
 
+  const runStressTest = async () => {
+    setStressStatus("uploading");
+    setStressResults(null);
+    try {
+      const res = await fetch("/api/admin/stress-upload", { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        setStressStatus("success");
+        setStressResults(data);
+        fetchData();
+      } else {
+        setStressStatus("error");
+        alert(data.error || (lang === "sk" ? "Chyba pri importe" : "Import failed"));
+      }
+    } catch (e) {
+      setStressStatus("error");
+    }
+  };
+
+  const handleBulkUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files?.length) return;
+    
+    setStressStatus("uploading");
+    setStressResults(null);
+    const formData = new FormData();
+    Array.from(e.target.files).forEach(file => {
+      formData.append('photos', file);
+    });
+ 
+    try {
+      const response = await fetch('/api/admin/bulk-upload', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await response.json();
+ 
+      if (response.ok) {
+        setStressStatus("success");
+        setStressResults(data);
+        fetchData();
+        e.target.value = '';
+      } else {
+        setStressStatus("error");
+        alert(data.error || (lang === "sk" ? "Chyba pri uploade" : "Upload failed"));
+      }
+    } catch (err) {
+      setStressStatus("error");
+    }
+  };
+
+  const exportResults = () => {
+    window.location.href = "/api/admin/export-results";
+  };
+
   const fetchData = async () => {
     try {
-      const [statsRes, photosRes, evalsRes] = await Promise.all([
+      const [statsRes, photosRes, evalsRes, dashStatsRes] = await Promise.all([
         fetch("/api/stats"),
         fetch("/api/admin/photos"),
-        fetch("/api/evaluators")
+        fetch("/api/evaluators"),
+        fetch("/api/admin/dashboard-stats")
       ]);
-      setStats(await statsRes.json());
-      setPhotos(await photosRes.json());
-      setEvaluators(await evalsRes.json());
+      
+      const statsData = await (statsRes.ok ? statsRes.json() : Promise.resolve({}));
+      const photosData = await (photosRes.ok ? photosRes.json() : Promise.resolve([]));
+      const evalsData = await (evalsRes.ok ? evalsRes.json() : Promise.resolve([]));
+      const dashStatsData = await (dashStatsRes.ok ? dashStatsRes.json() : Promise.resolve({}));
+
+      setStats(statsData);
+      setPhotos(Array.isArray(photosData) ? photosData : []);
+      setEvaluators(evalsData);
+      setDashboardStats(dashStatsData);
     } catch (e) {
       console.error("Data fetch error", e);
     }
@@ -490,6 +569,7 @@ Vyhlásenie výsledkov: November 2026, SMOPaJ Liptovský Mikuláš.`,
               { id: "evaluators", label: lang === "sk" ? "Porota" : "Jury", icon: Users },
               { id: "embed", label: lang === "sk" ? "Prepojenie" : "Embed", icon: Code },
               { id: "settings", label: lang === "sk" ? "Nastavenia" : "Settings", icon: SettingsIcon },
+              { id: "stress", label: lang === "sk" ? "Stress Test" : "Stress Test", icon: Zap },
             ].map(tab => (
             <button
               key={tab.id}
@@ -531,11 +611,49 @@ Vyhlásenie výsledkov: November 2026, SMOPaJ Liptovský Mikuláš.`,
                   </select>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase text-muted">Contest Name</label>
+                  <label className="text-[10px] font-bold uppercase text-muted">Edition</label>
                   <input 
                     type="text" 
-                    value={settings.contestName}
-                    onChange={e => setSettings({ ...settings, contestName: e.target.value })}
+                    value={settings.edition}
+                    onChange={e => setSettings({ ...settings, edition: e.target.value })}
+                    className="w-full p-3 border border-border bg-white text-sm outline-none focus:border-ink"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase text-muted">Contest Name (SK)</label>
+                  <input 
+                    type="text" 
+                    value={settings.contestNameSk}
+                    onChange={e => setSettings({ ...settings, contestNameSk: e.target.value })}
+                    className="w-full p-3 border border-border bg-white text-sm outline-none focus:border-ink"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase text-muted">Contest Name (EN)</label>
+                  <input 
+                    type="text" 
+                    value={settings.contestNameEn}
+                    onChange={e => setSettings({ ...settings, contestNameEn: e.target.value })}
+                    className="w-full p-3 border border-border bg-white text-sm outline-none focus:border-ink"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase text-muted">Museum Name (SK)</label>
+                  <input 
+                    type="text" 
+                    value={settings.museumNameSk}
+                    onChange={e => setSettings({ ...settings, museumNameSk: e.target.value })}
+                    className="w-full p-3 border border-border bg-white text-sm outline-none focus:border-ink"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase text-muted">Museum Name (EN)</label>
+                  <input 
+                    type="text" 
+                    value={settings.museumNameEn}
+                    onChange={e => setSettings({ ...settings, museumNameEn: e.target.value })}
                     className="w-full p-3 border border-border bg-white text-sm outline-none focus:border-ink"
                   />
                 </div>
@@ -590,25 +708,7 @@ Vyhlásenie výsledkov: November 2026, SMOPaJ Liptovský Mikuláš.`,
                   </div>
                 </div>
 
-                <div className="space-y-2">
-                  <label className="text-[10px] font-bold uppercase text-muted">Edition</label>
-                  <input 
-                    type="text" 
-                    value={settings.edition}
-                    onChange={e => setSettings({ ...settings, edition: e.target.value })}
-                    className="w-full p-3 border border-border bg-white text-sm outline-none focus:border-ink"
-                  />
-                </div>
-                <div className="md:col-span-2 space-y-2">
-                  <label className="text-[10px] font-bold uppercase text-muted">Museum Name</label>
-                  <input 
-                    type="text" 
-                    value={settings.museumName}
-                    onChange={e => setSettings({ ...settings, museumName: e.target.value })}
-                    className="w-full p-3 border border-border bg-white text-sm outline-none focus:border-ink"
-                  />
-                </div>
-                <div className="md:col-span-2 space-y-4">
+                <div className="md:col-span-2 space-y-4 pt-4 border-t border-border">
                   <div className="flex items-center justify-between border-b border-border pb-2">
                     <label className="text-[10px] font-bold uppercase text-muted">{lang === "sk" ? "Kategórie" : "Categories"}</label>
                     <button 
@@ -620,7 +720,7 @@ Vyhlásenie výsledkov: November 2026, SMOPaJ Liptovský Mikuláš.`,
                           : nextLetter;
                         setSettings({
                           ...settings,
-                          categories: [...categories, { id: newId, name: `New Category ${newId}` }]
+                          categories: [...categories, { id: newId, nameSk: `Nová kategória ${newId}`, nameEn: `New Category ${newId}` }]
                         });
                       }}
                       className="text-[9px] font-bold uppercase text-accent flex items-center gap-1 hover:underline"
@@ -628,46 +728,99 @@ Vyhlásenie výsledkov: November 2026, SMOPaJ Liptovský Mikuláš.`,
                       <Plus size={10} /> {lang === "sk" ? "Pridať kategóriu" : "Add Category"}
                     </button>
                   </div>
-                  <div className="space-y-3">
+                  <div className="space-y-4">
                     {(settings?.categories || []).map((cat, idx) => (
-                      <div key={cat.id} className="flex gap-4 items-end">
-                        <div className="w-12">
-                          <label className="text-[8px] font-bold uppercase text-muted block mb-1">ID</label>
-                          <input 
-                            type="text" 
-                            value={cat.id}
-                            disabled
-                            className="w-full p-2 border border-border bg-paper text-xs text-center opacity-50"
-                          />
+                      <div key={cat.id} className="p-4 bg-paper border border-border space-y-3 relative group">
+                        <div className="flex gap-4">
+                          <div className="w-16">
+                            <label className="text-[8px] font-bold uppercase text-muted block mb-1">ID</label>
+                            <input 
+                              type="text" 
+                              value={cat.id}
+                              disabled
+                              className="w-full p-2 border border-border bg-paper text-xs text-center opacity-50"
+                            />
+                          </div>
+                          <div className="flex-1">
+                            <label className="text-[8px] font-bold uppercase text-muted block mb-1">Názov (SK)</label>
+                            <input 
+                              type="text" 
+                              value={cat.nameSk || cat.name || ''}
+                              onChange={e => {
+                                const newCats = [...settings.categories];
+                                newCats[idx].nameSk = e.target.value;
+                                setSettings({ ...settings, categories: newCats });
+                              }}
+                              className="w-full p-2 border border-border bg-white text-xs outline-none focus:border-ink"
+                            />
+                          </div>
+                          <div className="flex-1">
+                            <label className="text-[8px] font-bold uppercase text-muted block mb-1">Name (EN)</label>
+                            <input 
+                              type="text" 
+                              value={cat.nameEn || ''}
+                              onChange={e => {
+                                const newCats = [...settings.categories];
+                                newCats[idx].nameEn = e.target.value;
+                                setSettings({ ...settings, categories: newCats });
+                              }}
+                              className="w-full p-2 border border-border bg-white text-xs outline-none focus:border-ink"
+                            />
+                          </div>
+                          {(settings?.categories || []).length > 1 && (
+                            <button 
+                              onClick={() => setSettings({ ...settings, categories: settings.categories.filter((_, i) => i !== idx) })}
+                              className="absolute top-2 right-2 p-2 text-muted hover:text-red-500 transition-colors"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
                         </div>
-                        <div className="flex-1">
-                          <label className="text-[8px] font-bold uppercase text-muted block mb-1">Name</label>
-                          <input 
-                            type="text" 
-                            value={cat.name}
-                            onChange={e => {
-                              const categories = settings?.categories || [];
-                              const newCats = [...categories];
-                              newCats[idx].name = e.target.value;
-                              setSettings({ ...settings, categories: newCats });
-                            }}
-                            className="w-full p-2 border border-border bg-white text-xs outline-none focus:border-ink"
-                          />
+                        
+                        <div className="grid grid-cols-3 gap-4 pt-3 border-t border-border/40">
+                          <div>
+                            <label className="text-[8px] font-bold uppercase text-muted block mb-1">{lang === "sk" ? "Min. znakov" : "Min Chars"}</label>
+                            <input 
+                              type="number" 
+                              value={cat.minDesc || 0}
+                              onChange={e => {
+                                const newCats = [...settings.categories];
+                                newCats[idx].minDesc = parseInt(e.target.value) || 0;
+                                setSettings({ ...settings, categories: newCats });
+                              }}
+                              className="w-full p-2 border border-border bg-white text-xs outline-none focus:border-ink"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[8px] font-bold uppercase text-muted block mb-1">{lang === "sk" ? "Max. znakov" : "Max Chars"}</label>
+                            <input 
+                              type="number" 
+                              value={cat.maxDesc || 5000}
+                              onChange={e => {
+                                const newCats = [...settings.categories];
+                                newCats[idx].maxDesc = parseInt(e.target.value) || 5000;
+                                setSettings({ ...settings, categories: newCats });
+                              }}
+                              className="w-full p-2 border border-border bg-white text-xs outline-none focus:border-ink"
+                            />
+                          </div>
+                          <div className="flex items-center gap-2 pt-4">
+                            <input 
+                              type="checkbox" 
+                              id={`req-${cat.id}`}
+                              checked={cat.descRequired}
+                              onChange={e => {
+                                const newCats = [...settings.categories];
+                                newCats[idx].descRequired = e.target.checked;
+                                setSettings({ ...settings, categories: newCats });
+                              }}
+                              className="w-4 h-4 rounded border-border text-ink focus:ring-ink"
+                            />
+                            <label htmlFor={`req-${cat.id}`} className="text-[8px] font-bold uppercase text-muted cursor-pointer select-none">
+                              {lang === "sk" ? "Povinný príbeh" : "Story Required"}
+                            </label>
+                          </div>
                         </div>
-                        {(settings?.categories || []).length > 1 && (
-                          <button 
-                            onClick={() => {
-                              const categories = settings?.categories || [];
-                              setSettings({
-                                ...settings,
-                                categories: categories.filter((_, i) => i !== idx)
-                              });
-                            }}
-                            className="p-2.5 text-muted hover:text-red-500 transition-colors"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        )}
                       </div>
                     ))}
                   </div>
@@ -733,6 +886,27 @@ Vyhlásenie výsledkov: November 2026, SMOPaJ Liptovský Mikuláš.`,
                     className="w-full p-3 border border-border bg-white text-sm outline-none focus:border-ink"
                     placeholder="e.g. $author | Speleofotografia 2026"
                   />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:col-span-2">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold uppercase text-muted">Watermark Font Size (px)</label>
+                    <input 
+                      type="number" 
+                      value={settings.watermarkFontSize || 24}
+                      onChange={e => setSettings({ ...settings, watermarkFontSize: parseInt(e.target.value) || 24 })}
+                      className="w-full p-3 border border-border bg-white text-sm outline-none focus:border-ink"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold uppercase text-muted">Watermark Color (RGBA/Hex)</label>
+                    <input 
+                      type="text" 
+                      value={settings.watermarkColor || "rgba(255,255,255,0.4)"}
+                      onChange={e => setSettings({ ...settings, watermarkColor: e.target.value })}
+                      className="w-full p-3 border border-border bg-white text-sm outline-none focus:border-ink"
+                      placeholder="rgba(255,255,255,0.4)"
+                    />
+                  </div>
                 </div>
                 <div className="space-y-2 md:col-span-2 border border-border p-4 bg-paper">
                   <label className="text-[10px] font-bold uppercase text-muted block mb-2">{lang === "sk" ? "Logo súťaže" : "Contest Logo"}</label>
@@ -939,34 +1113,103 @@ Vyhlásenie výsledkov: November 2026, SMOPaJ Liptovský Mikuláš.`,
           </div>
         )}
         {activeTab === "stats" && (
-          <div className="space-y-10">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              <StatCard label={lang === "sk" ? "Fotografie celkom" : "Total Photos"} value={stats.total} />
-              <StatCard label={lang === "sk" ? "Počet autorov" : "Total Authors"} value={stats.uniqueEmails} />
-              {(settings?.categories || []).map(cat => (
-                <div key={cat.id}>
-                  <StatCard 
-                    label={cat.name?.split(" / ")?.[0] || cat.id} 
-                    value={stats[`cat${cat.id}`] || 0} 
-                  />
+          <div className="space-y-12">
+            {/* Stats Overview */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+              <div className="p-6 bg-paper border border-border space-y-2">
+                <div className="flex justify-between items-center">
+                  <p className="text-[10px] font-bold uppercase text-muted tracking-widest">Total Photos</p>
+                  <ImageIcon size={16} className="text-muted" />
                 </div>
-              ))}
+                <p className="text-3xl font-light">{dashboardStats?.totalPhotos || stats.total || 0}</p>
+              </div>
+              <div className="p-6 bg-paper border border-border space-y-2">
+                <div className="flex justify-between items-center">
+                  <p className="text-[10px] font-bold uppercase text-muted tracking-widest">Authors</p>
+                  <Users size={16} className="text-muted" />
+                </div>
+                <p className="text-3xl font-light">{dashboardStats?.uniqueAuthors || stats.uniqueEmails || 0}</p>
+              </div>
+              <div className="p-6 bg-paper border border-border space-y-2">
+                <div className="flex justify-between items-center">
+                  <p className="text-[10px] font-bold uppercase text-muted tracking-widest">Public Votes</p>
+                  <Heart size={16} className="text-muted" />
+                </div>
+                <p className="text-3xl font-light">{dashboardStats?.totalPublicVotes || 0}</p>
+              </div>
+              <div className="p-6 bg-paper border border-border space-y-2">
+                <div className="flex justify-between items-center">
+                  <p className="text-[10px] font-bold uppercase text-muted tracking-widest">Daily Access</p>
+                  <Activity size={16} className="text-muted" />
+                </div>
+                <p className="text-3xl font-light">{dashboardStats?.dailyAccess || 0}</p>
+              </div>
             </div>
 
-            {/* Public Choice Leaderboard */}
-            <div className="bg-paper border border-border p-8 space-y-6">
-              <div className="flex items-center justify-between border-b border-border pb-4">
-                <div className="flex items-center gap-3">
-                  <Heart size={20} className="text-accent" />
-                  <h3 className="text-[12px] font-bold uppercase tracking-[2px]">
-                    {lang === "sk" ? "Cena verejnosti - Priebežný rebríček" : "Public Choice - Current Standings"}
-                  </h3>
+            {/* Daily Traffic Chart */}
+            <div className="p-8 bg-paper border border-border space-y-8">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div className="space-y-1">
+                  <h4 className="text-[11px] font-bold uppercase tracking-[2px]">Aktivita za posledných 14 dní</h4>
+                  <p className="text-[9px] text-muted uppercase font-medium">Interaktívny prehľad návštevnosti a verejného hlasovania</p>
                 </div>
+                <div className="flex gap-4 text-[9px] uppercase font-bold text-muted">
+                  <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-ink rounded-xs" /> Návštevy</div>
+                  <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-accent rounded-xs" /> Hodnotenia</div>
+                </div>
+              </div>
+              
+              <div className="h-64 flex items-end gap-1.5 md:gap-3 px-2 border-b border-border/30 relative">
+                {/* Y-Axis helper lines */}
+                {[0, 25, 50, 75, 100].map(line => (
+                  <div key={line} className="absolute left-0 right-0 border-t border-border/10 pointer-events-none" style={{ bottom: `${line}%` }} />
+                ))}
+
+                {(dashboardStats?.activity || []).map((data: any, i: number) => {
+                  const maxVal = Math.max(...dashboardStats.activity.map((d: any) => Math.max(d.visits, d.votes)), 1);
+                  return (
+                    <div key={i} className="flex-1 flex flex-col justify-end gap-1 group relative">
+                      {/* Tooltip */}
+                      <div className="absolute -top-16 left-1/2 -translate-x-1/2 bg-ink text-white text-[9px] p-2 opacity-0 group-hover:opacity-100 transition-all rounded shadow-xl z-20 pointer-events-none whitespace-nowrap">
+                        <p className="font-bold border-b border-white/20 pb-1 mb-1">{data.day}</p>
+                        <p className="flex justify-between gap-4"><span>Visits:</span> <b>{data.visits}</b></p>
+                        <p className="flex justify-between gap-4"><span>Votes:</span> <b>{data.votes}</b></p>
+                      </div>
+
+                      {/* Bars */}
+                      <div className="flex items-end gap-[2px] h-full">
+                        <div 
+                          className="flex-1 bg-ink/20 group-hover:bg-ink transition-colors rounded-t-[1px]" 
+                          style={{ height: `${(data.visits / maxVal) * 100}%` }} 
+                        />
+                        <div 
+                          className="flex-1 bg-accent/20 group-hover:bg-accent transition-colors rounded-t-[1px]" 
+                          style={{ height: `${(data.votes / maxVal) * 100}%` }} 
+                        />
+                      </div>
+                      
+                      {/* Label - show only every 3rd day or first/last to avoid clutter */}
+                      {(i === 0 || i === 13 || i % 3 === 0) && (
+                        <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-[8px] text-muted font-bold uppercase rotate-45 origin-left whitespace-nowrap">
+                          {data.day.split('-').slice(1).join('/')}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Public Ranking Mini-View */}
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <h3 className="text-[11px] font-bold uppercase tracking-[2px] text-muted border-b border-border pb-2">
+                  {lang === "sk" ? "Cena verejnosti - Priebežný rebríček" : "Public Choice - Current Standings"}
+                </h3>
                 <span className="text-[10px] font-bold text-muted uppercase tracking-widest">
                   {(Object.values(publicResults) as number[]).reduce((a: number, b: number) => a + b, 0)} {lang === "sk" ? "hlasov celkom" : "total votes"}
                 </span>
               </div>
-
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                  {Object.entries(publicResults)
                    .sort(([, a], [, b]) => (b as number) - (a as number))
@@ -992,43 +1235,159 @@ Vyhlásenie výsledkov: November 2026, SMOPaJ Liptovský Mikuláš.`,
                    })}
               </div>
             </div>
-            
-            <div className="bg-paper border border-border p-10 flex flex-col items-center justify-center space-y-6">
-              <div className="text-center space-y-2">
-                <h3 className="text-xl font-bold uppercase tracking-tight">
-                  {lang === "sk" ? "Export dát" : "Data Export"}
-                </h3>
-                <p className="text-[11px] uppercase tracking-widest text-muted">
-                  {lang === "sk" ? "Stiahnite si dáta pre zasadnutie komisie" : "Download data for the committee meeting"}
+
+            {/* Export Actions */}
+            <div className="flex flex-col md:flex-row gap-6 p-8 bg-ink text-white items-center justify-between rounded-sm">
+              <div className="space-y-2 text-center md:text-left">
+                <h4 className="text-sm font-bold uppercase tracking-[3px]">Exportovať výsledky súťaže</h4>
+                <p className="text-[11px] opacity-70 max-w-md">
+                  Kompletná databáza fotiek, autorov, bodového hodnotenia a poradia. Formát CSV je kompatibilný s Excelom a Google Sheets.
                 </p>
               </div>
-              <div className="flex gap-4">
-                <a href="/data/registrations.csv" download className="px-6 py-4 bg-ink text-white text-[11px] uppercase font-bold tracking-[2px] transition-all hover:opacity-90 flex items-center gap-2">
-                  <Download size={14} /> {lang === "sk" ? "Registre / CSV" : "Registry / CSV"}
-                </a>
-                <a href="/api/admin/export/photos-zip" download className="px-6 py-4 border border-ink text-ink text-[11px] uppercase font-bold tracking-[2px] transition-all hover:bg-ink hover:text-white flex items-center gap-2">
-                  <ImageIcon size={14} /> {lang === "sk" ? "Originály / ZIP" : "Originals / ZIP"}
-                </a>
-                <a href="/data/ratings.csv" download className="px-6 py-4 border border-border text-muted text-[11px] uppercase font-bold tracking-[2px] transition-all hover:border-ink hover:text-ink flex items-center gap-2">
-                  <BarChart3 size={14} /> {lang === "sk" ? "Body / CSV" : "Scores / CSV"}
-                </a>
-              </div>
+              <button 
+                onClick={exportResults}
+                className="flex items-center gap-3 px-10 py-4 bg-white text-ink text-[11px] font-bold uppercase tracking-widest hover:bg-paper transition-colors"
+              >
+                <Download size={16} />
+                Download CSV
+              </button>
             </div>
+          </div>
+        )}
 
-            <div className="p-8 border border-border bg-white space-y-4">
-              <label className="text-[11px] font-bold uppercase tracking-widest text-muted">
-                {lang === "sk" ? "WordPress integrácia (Shortcodes)" : "WordPress Integration (Shortcodes)"}
-              </label>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="p-4 bg-paper font-mono text-[10px] space-y-1">
-                  <p className="text-accent font-bold"># Gallery Shortcode</p>
-                  <code>[speleo_gallery category="all" year="2025" count="{stats.total}"]</code>
+        {activeTab === "stress" && (
+          <div className="max-w-3xl space-y-10">
+            <div className="space-y-6">
+              <h3 className="text-[11px] font-bold uppercase tracking-[2px] text-muted border-b border-border pb-2 flex items-center gap-2">
+                <Zap size={14} className="text-ink" />
+                Stress Test & Demo Data
+              </h3>
+              
+              <div className="p-8 bg-paper border border-border space-y-6">
+                <div className="space-y-2">
+                  <h4 className="text-sm font-bold uppercase tracking-widest">Hromadný import testovacích dát</h4>
+                  <p className="text-xs text-muted leading-relaxed">
+                    Tento nástroj automaticky načíta fotografie z adresára <code className="bg-muted px-1 rounded">/demo</code>. 
+                    Fotky začínajúce na <strong>A*</strong> budú priradené do kategórie A, fotky na <strong>B*</strong> do kategórie B.
+                    Budú vytvorené náhodné mená autorov pre simuláciu reálnej prevádzky.
+                  </p>
                 </div>
-                <div className="p-4 bg-paper font-mono text-[10px] space-y-1">
-                  <p className="text-accent font-bold"># Stats Shortcode</p>
-                  <code>[speleo_stats authors="..." photos_a="{stats.catA}" photos_b="{stats.catB}"]</code>
+
+                <div className="flex items-center gap-6">
+                  <button 
+                    onClick={runStressTest}
+                    disabled={stressStatus === "uploading"}
+                    className="px-8 py-4 bg-ink text-white text-[11px] font-bold uppercase tracking-[2px] hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {stressStatus === "uploading" ? (
+                      <>
+                        <Activity className="animate-spin" size={14} />
+                        Spracovávam...
+                      </>
+                    ) : (
+                      <>
+                        <Plus size={14} />
+                        Spustiť Stress Test
+                      </>
+                    )}
+                  </button>
+                  
+                  {stressStatus === "success" && (
+                    <p className="text-green-600 text-[10px] font-bold uppercase flex items-center gap-1">
+                      <Check size={14} /> Import dokončený
+                    </p>
+                  )}
+                  {stressStatus === "error" && (
+                    <p className="text-red-600 text-[10px] font-bold uppercase flex items-center gap-1">
+                      <X size={14} /> Chyba pri importe
+                    </p>
+                  )}
                 </div>
               </div>
+
+              <div className="p-8 border-2 border-dashed border-border bg-paper/50 flex flex-col items-center justify-center space-y-4">
+                <div className="w-16 h-16 bg-white border border-border flex items-center justify-center text-muted">
+                  <Upload size={32} />
+                </div>
+                <div className="text-center">
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-ink">{lang === "sk" ? "Priamy hromadný upload" : "Direct Bulk Upload"}</p>
+                  <p className="text-[10px] text-muted uppercase tracking-tight">
+                    {lang === "sk" ? "Vyberte viacero súborov naraz z vášho počítača" : "Select multiple files at once from your computer"}
+                  </p>
+                </div>
+                <input 
+                   type="file" 
+                   multiple 
+                   accept="image/*"
+                   onChange={handleBulkUpload}
+                   className="hidden" 
+                   id="bulk-upload-input"
+                   disabled={stressStatus === "uploading"}
+                />
+                <label 
+                  htmlFor="bulk-upload-input"
+                  className={cn(
+                    "px-6 py-3 bg-ink text-white text-[10px] font-bold uppercase tracking-widest cursor-pointer hover:opacity-90 transition-all",
+                    stressStatus === "uploading" && "opacity-50 cursor-not-allowed"
+                  )}
+                >
+                  {stressStatus === "uploading" ? (lang === "sk" ? "Nahrávam..." : "Uploading...") : (lang === "sk" ? "Vybrať fotky k testovaniu" : "Select Photos for Testing")}
+                </label>
+              </div>
+
+              {stressResults && (
+                <div className="space-y-4 animate-in fade-in slide-in-from-top-4">
+                  <div className="flex items-center justify-between border-b border-border pb-2">
+                    <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted">Aktivita spracovania</h4>
+                    <span className="text-[10px] font-bold text-ink uppercase">{stressResults.count} {lang === "sk" ? "súborov spracovaných" : "files processed"}</span>
+                  </div>
+                  
+                  <div className="max-h-80 overflow-y-auto border border-border bg-paper/30 divide-y divide-border/50">
+                    {stressResults?.details?.map((res: any, idx: number) => (
+                      <div key={idx} className="p-3 flex items-center justify-between gap-4 text-[10px]">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {res.status === "success" ? (
+                            <div className="w-4 h-4 bg-green-100 text-green-700 flex items-center justify-center rounded-full shrink-0">
+                              <Check size={10} />
+                            </div>
+                          ) : (
+                            <div className="w-4 h-4 bg-red-100 text-red-700 flex items-center justify-center rounded-full shrink-0">
+                              <X size={10} />
+                            </div>
+                          )}
+                          <span className="font-mono truncate opacity-80">{res.name}</span>
+                        </div>
+                        <div className="flex items-center gap-3 shrink-0">
+                          {res.watermark && (
+                            <span className={cn(
+                              "px-1.5 py-0.5 rounded-[2px] font-bold uppercase text-[8px] tracking-tight",
+                              res.watermark === "success" ? "bg-green-50 text-green-600 border border-green-200" : "bg-yellow-50 text-yellow-600 border border-yellow-200"
+                            )}>
+                              {lang === "sk" ? "Vodoznak" : "Watermark"}: {res.watermark}
+                            </span>
+                          )}
+                          {res.status === "error" && (
+                            <span className="text-red-600 font-bold uppercase italic text-[9px]">{res.error}</span>
+                          )}
+                          <span className={cn(
+                            "font-bold uppercase tracking-widest text-[9px]",
+                            res.status === "success" ? "text-green-600" : "text-red-600"
+                          )}>
+                            {res.status}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <button 
+                    onClick={() => { setStressResults(null); setStressStatus("idle"); }}
+                    className="text-[9px] font-bold uppercase tracking-widest text-muted hover:text-ink transition-colors flex items-center gap-2"
+                  >
+                    {lang === "sk" ? "Vymazať výpis" : "Clear Log"}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1204,7 +1563,7 @@ Vyhlásenie výsledkov: November 2026, SMOPaJ Liptovský Mikuláš.`,
                       photoFilter === cat.id ? "bg-ink text-white border-ink" : "bg-white text-muted border-border hover:border-ink"
                     )}
                   >
-                    {cat.name?.split(" / ")?.[0] || cat.id}
+                    {lang === "sk" ? cat.nameSk : cat.nameEn}
                   </button>
                 ))}
               </div>
@@ -1235,19 +1594,71 @@ Vyhlásenie výsledkov: November 2026, SMOPaJ Liptovský Mikuláš.`,
                     <List size={16} />
                   </button>
                 </div>
-                <div className="text-[10px] font-bold uppercase tracking-widest text-muted">
-                  {photos.filter(p => (photoFilter === "all" || p.category === photoFilter) && (p.author.toLowerCase().includes(searchQuery.toLowerCase()) || p.name.toLowerCase().includes(searchQuery.toLowerCase()))).length} {lang === "sk" ? "výsledkov" : "results"}
-                </div>
+              </div>
+            </div>
+
+            {/* Bulk Actions Bar */}
+            <div className={cn(
+              "sticky top-4 z-30 flex items-center justify-between bg-ink text-white p-4 transition-all duration-300 shadow-2xl",
+              selectedPhotos.length > 0 ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-4 pointer-events-none h-0 p-0 overflow-hidden"
+            )}>
+              <div className="flex items-center gap-4">
+                <span className="text-[10px] font-bold uppercase tracking-widest bg-white/20 px-3 py-1.5 rounded-full">
+                  {selectedPhotos.length} {lang === "sk" ? "vybraných" : "selected"}
+                </span>
+                <button 
+                  onClick={selectAllPhotos}
+                  className="text-[10px] font-bold uppercase tracking-widest hover:text-accent transition-colors"
+                >
+                  {selectedPhotos.length === filteredPhotos.length ? (lang === "sk" ? "Zrušiť výber" : "Deselect All") : (lang === "sk" ? "Vybrať všetko" : "Select All")}
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={deleteSelected}
+                  className="px-4 py-2 bg-red-500 text-white text-[10px] font-bold uppercase tracking-widest hover:bg-red-600 transition-all flex items-center gap-2"
+                >
+                  <Trash2 size={14} /> {lang === "sk" ? "Zmazať vybrané" : "Delete Selected"}
+                </button>
+                <button 
+                  onClick={deleteAll}
+                  className="px-4 py-2 border border-white/30 text-white text-[10px] font-bold uppercase tracking-widest hover:bg-white hover:text-ink transition-all flex items-center gap-2"
+                >
+                  <AlertTriangle size={14} /> {lang === "sk" ? "Zmazať ÚPLNE všetko" : "Delete ABSOLUTELY All"}
+                </button>
+                <button 
+                  onClick={() => setSelectedPhotos([])}
+                  className="p-2 hover:bg-white/10 transition-colors"
+                >
+                  <X size={18} />
+                </button>
               </div>
             </div>
 
             {galleryView === "grid" ? (
               <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
-                {photos
-                  .filter(p => (photoFilter === "all" || p.category === photoFilter) && (p.author.toLowerCase().includes(searchQuery.toLowerCase()) || p.name.toLowerCase().includes(searchQuery.toLowerCase())))
-                  .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-                  .map(photo => (
-                  <div key={photo.id} className="aspect-square bg-paper border border-border relative group overflow-hidden cursor-pointer" onClick={() => setSelectedPhoto(photo)}>
+                {filteredPhotos.map(photo => (
+                  <div 
+                    key={photo.id} 
+                    className={cn(
+                      "aspect-square bg-paper border relative group overflow-hidden cursor-pointer transition-all",
+                      selectedPhotos.includes(photo.id) ? "border-ink ring-2 ring-ink ring-inset" : "border-border"
+                    )}
+                    onClick={() => setSelectedPhoto(photo)}
+                  >
+                    {/* Bulk Select Checkbox */}
+                    <div 
+                      className={cn(
+                        "absolute top-2 left-2 z-20 w-5 h-5 border-2 transition-all flex items-center justify-center",
+                        selectedPhotos.includes(photo.id) ? "bg-ink border-ink text-white" : "bg-white/80 border-white opacity-0 group-hover:opacity-100"
+                      )}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleSelectPhoto(photo.id);
+                      }}
+                    >
+                      {selectedPhotos.includes(photo.id) && <Check size={14} strokeWidth={4} />}
+                    </div>
                     <img 
                       src={`/uploads/${photo.webPath || photo.path}`} 
                       className="w-full h-full object-cover transition-all duration-500 group-hover:scale-110" 
@@ -1256,8 +1667,8 @@ Vyhlásenie výsledkov: November 2026, SMOPaJ Liptovský Mikuláš.`,
                     <div className="absolute inset-0 bg-ink/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                       <Eye size={24} className="text-white" />
                     </div>
-                    <div className="absolute top-2 left-2 px-2 py-1 bg-ink/80 text-white text-[8px] font-bold uppercase tracking-widest">
-                      {photo.category}
+                    <div className="absolute bottom-11 left-2 px-1.5 py-0.5 bg-ink/60 text-white text-[7px] font-bold uppercase tracking-widest backdrop-blur-sm">
+                      {(settings?.categories || []).find(c => c.id === photo.category)?.[lang === "sk" ? "nameSk" : "nameEn"] || photo.category}
                     </div>
                     <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button 
@@ -1287,6 +1698,17 @@ Vyhlásenie výsledkov: November 2026, SMOPaJ Liptovský Mikuláš.`,
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="bg-paper border-b border-border">
+                      <th className="p-4 w-10">
+                        <div 
+                          onClick={selectAllPhotos}
+                          className={cn(
+                            "w-4 h-4 border-2 cursor-pointer flex items-center justify-center transition-all",
+                            selectedPhotos.length === filteredPhotos.length && filteredPhotos.length > 0 ? "bg-ink border-ink text-white" : "bg-white border-border hover:border-ink"
+                          )}
+                        >
+                          {selectedPhotos.length === filteredPhotos.length && filteredPhotos.length > 0 && <Check size={12} strokeWidth={4} />}
+                        </div>
+                      </th>
                       <th className="p-4 text-[9px] font-bold uppercase tracking-widest text-muted w-20">{lang === "sk" ? "Foto" : "Photo"}</th>
                       <th className="p-4 text-[9px] font-bold uppercase tracking-widest text-muted">{lang === "sk" ? "Dielo / Autor" : "Piece / Author"}</th>
                       <th className="p-4 text-[9px] font-bold uppercase tracking-widest text-muted">{lang === "sk" ? "Krátky list" : "Shortlist"}</th>
@@ -1295,11 +1717,19 @@ Vyhlásenie výsledkov: November 2026, SMOPaJ Liptovský Mikuláš.`,
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
-                    {photos
-                      .filter(p => (photoFilter === "all" || p.category === photoFilter) && (p.author.toLowerCase().includes(searchQuery.toLowerCase()) || p.name.toLowerCase().includes(searchQuery.toLowerCase())))
-                      .sort((a, b) => (b.averageScore || 0) - (a.averageScore || 0))
-                      .map(photo => (
-                      <tr key={photo.id} className={cn("hover:bg-paper/50 transition-colors group", photo.shortlisted && "bg-accent/5")}>
+                    {filteredPhotos.map(photo => (
+                      <tr key={photo.id} className={cn("hover:bg-paper/50 transition-colors group", photo.shortlisted && "bg-accent/5", selectedPhotos.includes(photo.id) && "bg-ink/5")}>
+                        <td className="p-4">
+                          <div 
+                            onClick={() => toggleSelectPhoto(photo.id)}
+                            className={cn(
+                              "w-4 h-4 border-2 cursor-pointer flex items-center justify-center transition-all",
+                              selectedPhotos.includes(photo.id) ? "bg-ink border-ink text-white" : "bg-white border-border hover:border-ink"
+                            )}
+                          >
+                            {selectedPhotos.includes(photo.id) && <Check size={12} strokeWidth={4} />}
+                          </div>
+                        </td>
                         <td className="p-4">
                           <div className="w-12 h-12 bg-paper border border-border overflow-hidden cursor-pointer" onClick={() => setSelectedPhoto(photo)}>
                             <img src={`/uploads/${photo.webPath || photo.path}`} className="w-full h-full object-cover" alt="" />
@@ -1505,7 +1935,11 @@ Vyhlásenie výsledkov: November 2026, SMOPaJ Liptovský Mikuláš.`,
                             onChange={e => setEditingPhoto({...editingPhoto, category: e.target.value})}
                             className="w-full p-3 border border-border bg-paper text-sm outline-none focus:border-ink"
                           >
-                            {settings.categories.map(cat => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
+                            {settings.categories.map(cat => (
+                              <option key={cat.id} value={cat.id}>
+                                {lang === "sk" ? cat.nameSk : cat.nameEn}
+                              </option>
+                            ))}
                           </select>
                        </div>
                        <div className="space-y-1">
@@ -1569,7 +2003,9 @@ Vyhlásenie výsledkov: November 2026, SMOPaJ Liptovský Mikuláš.`,
                       <div className="space-y-6">
                         <div className="flex justify-between items-start">
                           <div>
-                            <p className="text-accent text-[11px] font-bold uppercase tracking-[2px] mb-1">{selectedPhoto.category}</p>
+                            <p className="text-accent text-[11px] font-bold uppercase tracking-[2px] mb-1">
+                              {settings.categories.find(c => c.id === selectedPhoto.category)?.[lang === "sk" ? "nameSk" : "nameEn"] || selectedPhoto.category}
+                            </p>
                             <h3 className="text-2xl font-light tracking-tight">{selectedPhoto.name}</h3>
                           </div>
                           <button onClick={() => setSelectedPhoto(null)} className="text-muted hover:text-ink">

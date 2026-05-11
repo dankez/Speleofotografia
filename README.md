@@ -20,10 +20,13 @@ A web application for managing an international caving photography competition.
 - **Galéria**: Prehliadanie nahraných fotografií s detailmi o autorovi.
 - **Porota**: Generovanie unikátnych odkazov pre jednotlivých porotcov na hodnotenie.
 - **Prepojenie (Embed)**: Generovanie IFrame kódov pre jednoduché a bezpečné vloženie galérie alebo prihlášky na externé webové stránky (napr. WordPress).
-- **Nastavenia**: Správa textov (názov súťaže, ročník), limitov a konfigurácia SMTP servera.
+- **Nastavenia**: Správa textov (názov súťaže, ročník), limitov, konfigurácia SMTP servera a prispôsobenie vodoznakov (farba, veľkosť).
 - **Podmienky súťaže**: Integrovaný editor s podporou Markdownu pre detailné pravidlá súťaže.
+- **Dynamické pravidlá kategórií**: Možnosť nastaviť minimálnu/maximálnu dĺžku popisu príbehu a jeho povinnosť pre každú kategóriu zvlášť.
 
-### Bezpečnosť a súkromie
+### Bezpečnosť, súkromie a anonymita
+- **Plná anonymita poroty**: Porotcovia vidia fotografie bez mien autorov a pôvodných názvov súborov pre zabezpečenie objektívneho hodnotenia.
+- **Jednoznačné hodnotenie**: Jeden unikátny odkaz porotcu umožňuje udeliť fotke práve jeden hlas; opätovné hlasovanie pôvodnú hodnotu prepíše (nepriemeruje sa).
 - **Izolácia nastavení**: Citlivé údaje (ako SMTP heslo alebo administrátorské prihlasovacie údaje) sú na strane servera chránené. 
 - **Validácia**: Všetky vstupy od užívateľov sú sanitované pred uložením do systému.
 - **IFrame Security**: Použitie moderných atribútov (`referrerpolicy`, `loading="lazy"`) pre bezpečnú integráciu.

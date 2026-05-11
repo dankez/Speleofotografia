@@ -19,6 +19,32 @@ export default function PublicGallery({ lang }: { lang: Lang }) {
   const [votedIds, setVotedIds] = useState<string[]>([]);
   const [selectedPhoto, setSelectedPhoto] = useState<PublicPhoto | null>(null);
   const [filter, setFilter] = useState<string>("all");
+  const filteredPhotos = photos.filter(p => filter === "all" || p.category === filter);
+
+  const handleNext = () => {
+    if (!selectedPhoto) return;
+    const currentIndex = filteredPhotos.findIndex(p => p.id === selectedPhoto.id);
+    const nextIndex = (currentIndex + 1) % filteredPhotos.length;
+    setSelectedPhoto(filteredPhotos[nextIndex]);
+  };
+
+  const handlePrev = () => {
+    if (!selectedPhoto) return;
+    const currentIndex = filteredPhotos.findIndex(p => p.id === selectedPhoto.id);
+    const prevIndex = (currentIndex - 1 + filteredPhotos.length) % filteredPhotos.length;
+    setSelectedPhoto(filteredPhotos[prevIndex]);
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!selectedPhoto) return;
+      if (e.key === "ArrowRight") handleNext();
+      if (e.key === "ArrowLeft") handlePrev();
+      if (e.key === "Escape") setSelectedPhoto(null);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedPhoto, filteredPhotos]);
 
   useEffect(() => {
     // Load voted IDs from local storage for privacy
@@ -121,16 +147,14 @@ export default function PublicGallery({ lang }: { lang: Lang }) {
                   : "bg-transparent text-muted border-border hover:border-ink"
               )}
             >
-              {cat.name?.split(" / ")[0] || cat.id}
+              {lang === "sk" ? cat.nameSk : cat.nameEn}
             </button>
           ))}
         </div>
       </div>
 
       <div className="columns-1 sm:columns-2 lg:columns-3 xl:columns-4 gap-3 md:gap-4 space-y-3 md:space-y-4 px-3 md:px-4 max-w-[1800px] mx-auto">
-        {photos
-          .filter(p => filter === "all" || p.category === filter)
-          .map((photo) => (
+        {filteredPhotos.map((photo) => (
           <motion.div
             layout
             key={photo.id}
@@ -140,7 +164,7 @@ export default function PublicGallery({ lang }: { lang: Lang }) {
             onClick={() => setSelectedPhoto(photo)}
           >
             <img 
-              src={`/uploads/${photo.webPath}`} 
+              src={`/uploads/${photo.webPath || (photo.id + ".webp")}`} 
               className="w-full h-auto grayscale-[30%] md:grayscale-[50%] group-hover:grayscale-0 transition-all duration-500"
               alt={photo.name}
             />
@@ -149,8 +173,10 @@ export default function PublicGallery({ lang }: { lang: Lang }) {
             <div className="absolute inset-x-0 bottom-0 p-3 md:p-4 bg-gradient-to-t from-black/90 via-black/40 to-transparent md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                <div className="flex justify-between items-end gap-2">
                   <div className="space-y-0.5">
-                    <p className="text-[7px] md:text-[8px] text-accent font-bold uppercase tracking-widest">{photo.category}</p>
-                    <p className="text-[10px] md:text-[11px] text-white font-bold tracking-tight line-clamp-1">{photo.name}</p>
+                    <p className="text-[7px] md:text-[8px] text-accent font-bold uppercase tracking-widest">
+                      {(settings?.categories || []).find(c => c.id === photo.category)?.[lang === "sk" ? "nameSk" : "nameEn"] || photo.category}
+                    </p>
+                    <p className="text-[10px] md:text-[11px] text-white font-bold tracking-tight line-clamp-1">{lang === "sk" ? "Súťažná fotografia" : "Contest Photo"}</p>
                   </div>
                   <button 
                     onClick={(e) => handleVote(photo.id, e)}
@@ -186,18 +212,36 @@ export default function PublicGallery({ lang }: { lang: Lang }) {
             </button>
 
             <div className="flex flex-col lg:grid lg:grid-cols-12 gap-6 md:gap-12 max-w-7xl w-full min-h-screen lg:min-h-0 lg:h-auto items-center p-4 md:p-12">
-              <div className="w-full lg:col-span-8 flex items-center justify-center relative mt-12 lg:mt-0">
+              <div className="w-full lg:col-span-8 flex items-center justify-center relative mt-12 lg:mt-0 group/img">
+                {/* Navigation Arrows */}
+                <button 
+                  onClick={(e) => { e.stopPropagation(); handlePrev(); }}
+                  className="absolute left-2 md:-left-12 z-[110] p-4 text-white/40 hover:text-white transition-all bg-black/10 hover:bg-black/30 rounded-full md:opacity-0 md:group-hover/img:opacity-100"
+                >
+                  <ChevronLeft size={32} />
+                </button>
+
                 <motion.img 
+                  key={selectedPhoto.id}
                   layoutId={selectedPhoto.id}
-                  src={`/uploads/${selectedPhoto.webPath}`}
+                  src={`/uploads/${selectedPhoto.webPath || (selectedPhoto.id + ".webp")}`}
                   className="max-w-full max-h-[60vh] md:max-h-[80vh] object-contain shadow-2xl border border-white/5"
                 />
+
+                <button 
+                  onClick={(e) => { e.stopPropagation(); handleNext(); }}
+                  className="absolute right-2 md:-right-12 z-[110] p-4 text-white/40 hover:text-white transition-all bg-black/10 hover:bg-black/30 rounded-full md:opacity-0 md:group-hover/img:opacity-100"
+                >
+                  <ChevronRight size={32} />
+                </button>
               </div>
               
               <div className="w-full lg:col-span-4 space-y-6 md:space-y-8 bg-paper p-6 md:p-8 rounded-sm lg:shadow-2xl">
                 <div className="space-y-1.5">
-                  <p className="text-[9px] font-bold uppercase tracking-[3px] text-accent">{lang === "sk" ? "Kategória" : "Category"} {selectedPhoto.category}</p>
-                  <h2 className="text-2xl md:text-3xl font-light tracking-tighter uppercase">{selectedPhoto.name}</h2>
+                  <p className="text-[9px] font-bold uppercase tracking-[3px] text-accent">
+                    {lang === "sk" ? "Kategória" : "Category"} {(settings?.categories || []).find(c => c.id === selectedPhoto.category)?.[lang === "sk" ? "nameSk" : "nameEn"] || selectedPhoto.category}
+                  </p>
+                  <h2 className="text-2xl md:text-3xl font-light tracking-tighter uppercase">{lang === "sk" ? "Súťažná fotografia" : "Contest Photo"}</h2>
                 </div>
 
                 <div className="space-y-2 pb-6 border-b border-border">

@@ -147,7 +147,7 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
       catB: "Kat B - Moment",
       submit: "Odoslať prihlášku / Submit",
       successTitle: "Prihláška úspešne odoslaná",
-      successText: `Ďakujeme za vašu účasť - ${settings?.contestName || "Speleofotografia 2025"}`,
+      successText: `Ďakujeme za vašu účasť - ${settings?.contestNameSk || "Speleofotografia 2026"}`,
       newForm: "Nová prihláška / New Form",
       errorEmpty: "Vyplňte všetky povinné polia a nahrajte aspoň jednu fotku.",
       errorLimit: `Do každej kategórie môžete zaslať maximálne ${settings?.maxPhotosPerCategory || 5} fotografií.`,
@@ -173,7 +173,7 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
       catB: "Cat B - Moment",
       submit: "Submit Application",
       successTitle: "Application Submitted Successfully",
-      successText: `Thank you for your participation - ${settings?.contestName || "Speleophotography 2025"}`,
+      successText: `Thank you for your participation - ${settings?.contestNameEn || "Speleophotography 2026"}`,
       newForm: "New Application",
       errorEmpty: "Please fill in all required fields and upload at least one photo.",
       errorLimit: `You can submit a maximum of ${settings?.maxPhotosPerCategory || 5} photos per category.`,
@@ -260,15 +260,34 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
     });
 
     const maxPhotos = parseInt(settings?.maxPhotosPerCategory || "5");
-    (settings?.categories || []).forEach(cat => {
+      (settings?.categories || []).forEach(cat => {
       const existing = existingCounts[cat.id] || 0;
       const current = catCounts[cat.id] || 0;
+      const catDisplayName = lang === "sk" ? cat.nameSk : cat.nameEn;
       if (existing + current > maxPhotos) {
         if (existing > 0) {
-          errors.push(`${lang === "sk" ? "Limit prekročený. Už ste nahrali" : "Limit exceeded. You already uploaded"} ${existing} ${lang === "sk" ? "fotiek v kategórii" : "photos in category"} ${cat.name || cat.id}. ${lang === "sk" ? "Môžete pridať už len" : "You can only add"} ${maxPhotos - existing}.`);
+          errors.push(`${lang === "sk" ? "Limit prekročený. Už ste nahrali" : "Limit exceeded. You already uploaded"} ${existing} ${lang === "sk" ? "fotiek v kategórii" : "photos in category"} ${catDisplayName || cat.id}. ${lang === "sk" ? "Môžete pridať už len" : "You can only add"} ${maxPhotos - existing}.`);
         } else {
-          errors.push(`${lang === "sk" ? "Limit prekročený v kategorii" : "Limit exceeded in category"} ${cat.name || cat.id} (${current}/${maxPhotos})`);
+          errors.push(`${lang === "sk" ? "Limit prekročený v kategorii" : "Limit exceeded in category"} ${catDisplayName || cat.id} (${current}/${maxPhotos})`);
         }
+      }
+    });
+    
+    photos.forEach((p, idx) => {
+      const catSet = settings?.categories?.find(c => c.id === p.category);
+      const pMin = catSet?.minDesc || 0;
+      const pMax = catSet?.maxDesc || 5000;
+      const pReq = catSet?.descRequired;
+      const photoLabel = `#${idx + 1}`;
+
+      if (pReq && (!p.description || p.description.trim().length === 0)) {
+        errors.push(`${lang === "sk" ? "Príbeh je povinný pre fotografiu" : "Story is required for photo"} ${photoLabel}`);
+      } else if (p.description.length < pMin) {
+        errors.push(`${lang === "sk" ? "Príbeh k fotografii" : "Story for photo"} ${photoLabel} ${lang === "sk" ? "je príliš krátky" : "is too short"} (${p.description.length}/${pMin} ${lang === "sk" ? "znakov" : "chars"})`);
+      }
+      
+      if (p.description.length > pMax) {
+        errors.push(`${lang === "sk" ? "Príbeh k fotografii" : "Story for photo"} ${photoLabel} ${lang === "sk" ? "je príliš dlhý" : "is too long"} (${p.description.length}/${pMax} ${lang === "sk" ? "znakov" : "chars"})`);
       }
     });
 
@@ -386,7 +405,7 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
       <div className="flex flex-col md:flex-row justify-between items-start gap-4">
         <div className="space-y-2">
           <p className="text-[11px] text-muted uppercase font-bold tracking-widest">
-            {settings?.edition} - {settings?.museumName}
+            {settings?.edition} - {lang === "sk" ? settings?.museumNameSk : settings?.museumNameEn}
           </p>
           <div className="flex flex-col md:flex-row md:items-end gap-4">
             <h2 className="text-3xl font-light tracking-tight">{lang === "sk" ? "Prihláška" : "Application Form"}</h2>
@@ -536,7 +555,7 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
                     <div className="w-6 h-6 bg-ink text-white rounded-full flex items-center justify-center text-[10px] font-bold">
                       {cat.id}
                     </div>
-                    <h4 className="text-[10px] font-bold uppercase text-ink tracking-widest">{cat.name?.split(" / ")?.[0] || cat.id}</h4>
+                    <h4 className="text-[10px] font-bold uppercase text-ink tracking-widest">{lang === "sk" ? cat.nameSk : cat.nameEn}</h4>
                   </div>
                   <span className={cn(
                     "text-[9px] font-bold px-2 py-0.5 rounded-full",
@@ -605,12 +624,25 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
                                 className="w-full border-b border-border bg-transparent p-1 text-[11px] font-bold outline-none focus:border-ink"
                                 placeholder={photo.file?.name.split(".")[0] || t.photoName}
                               />
-                              <textarea 
-                                value={photo.description}
-                                onChange={e => updatePhotoInfo(globalIdx, { description: e.target.value })}
-                                className="w-full text-[10px] bg-white border border-border p-2 h-12 outline-none resize-none leading-tight"
-                                placeholder={t.photoDesc}
-                              />
+                              <div className="relative">
+                                <textarea 
+                                  value={photo.description}
+                                  onChange={e => updatePhotoInfo(globalIdx, { description: e.target.value })}
+                                  className={cn(
+                                    "w-full text-[10px] bg-white border p-2 h-16 outline-none resize-none leading-tight transition-colors",
+                                    cat.descRequired && !photo.description ? "border-red-200" : "border-border focus:border-ink"
+                                  )}
+                                  placeholder={t.photoDesc + (cat.descRequired ? " *" : "")}
+                                />
+                                <div className="absolute bottom-1 right-2 flex gap-2">
+                                  <span className={cn(
+                                    "text-[7px] font-bold uppercase",
+                                    (photo.description.length < (cat.minDesc || 0) || photo.description.length > (cat.maxDesc || 5000)) ? "text-red-500" : "text-muted/50"
+                                  )}>
+                                    {photo.description.length} / {cat.maxDesc || 5000}
+                                  </span>
+                                </div>
+                              </div>
                             </div>
                             <button 
                               onClick={() => removePhoto(globalIdx)}
@@ -693,7 +725,7 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
                     </button>
                   </div>
                   <div className="prose prose-sm max-w-none prose-headings:text-ink prose-headings:font-bold prose-headings:uppercase prose-headings:tracking-widest prose-p:text-muted prose-li:text-muted whitespace-pre-wrap font-sans">
-                    <ReactMarkdown>{settings?.rulesText || "Competition rules will be provided by the organizer."}</ReactMarkdown>
+                    <ReactMarkdown>{(lang === "sk" ? settings?.rulesSk : settings?.rulesEn) || "Competition rules will be provided by the organizer."}</ReactMarkdown>
                   </div>
                   <div className="pt-6 border-t border-border flex justify-end">
                     <button 

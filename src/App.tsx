@@ -18,15 +18,17 @@ type View = "home" | "admin" | "evaluator" | "admin-setup" | "public";
 export type Lang = "sk" | "en";
 
 export interface Settings {
-  contestName: string;
-  museumName: string;
+  contestNameSk: string;
+  contestNameEn: string;
+  museumNameSk: string;
+  museumNameEn: string;
   edition: string;
   contestStatus: "submissions" | "review" | "judging" | "shortlist" | "results";
   submissionStart?: string;
   submissionEnd?: string;
   judgingStart?: string;
   judgingEnd?: string;
-  categories: { id: string, name: string }[];
+  categories: { id: string, nameSk: string, nameEn: string }[];
   fieldRequirements: {
     author: boolean;
     email: boolean;
@@ -91,38 +93,34 @@ export default function App() {
 
   const isSubmissionActive = () => {
     if (!settings) return false;
-    if (settings.contestStatus !== "submissions") return false;
     
     const now = new Date();
-    if (settings.submissionStart) {
+    // If dates are set, they define the window regardless of status (for stress testing/flexibility)
+    if (settings.submissionStart && settings.submissionEnd) {
       const start = new Date(settings.submissionStart);
-      if (now < start) return false;
-    }
-    if (settings.submissionEnd) {
       const end = new Date(settings.submissionEnd);
-      // Set to end of the day
       end.setHours(23, 59, 59, 999);
-      if (now > end) return false;
+      return now >= start && now <= end;
     }
-    return true;
+    
+    // Fallback to status if dates are not properly set
+    return settings.contestStatus === "submissions";
   };
 
   const isJudgingActive = () => {
     if (!settings) return false;
-    // For judging we check judging status or shortlist or whatever
-    if (!["review", "judging", "shortlist"].includes(settings.contestStatus)) return false;
     
     const now = new Date();
-    if (settings.judgingStart) {
+    // Use dates as primary source of truth if available
+    if (settings.judgingStart && settings.judgingEnd) {
       const start = new Date(settings.judgingStart);
-      if (now < start) return false;
-    }
-    if (settings.judgingEnd) {
       const end = new Date(settings.judgingEnd);
       end.setHours(23, 59, 59, 999);
-      if (now > end) return false;
+      return now >= start && now <= end;
     }
-    return true;
+
+    // Fallback to status
+    return ["review", "judging", "shortlist"].includes(settings.contestStatus);
   };
 
   return (
@@ -142,8 +140,7 @@ export default function App() {
               />
             )}
             <div className="text-[14px] font-extrabold tracking-[2px] uppercase border-l-[3px] border-ink pl-3 group-hover:border-accent transition-colors">
-              {settings?.contestName?.split(" ").slice(0, -1).join(" ") || settings?.contestName}<br />
-              {(settings?.contestName?.split(" ")?.length || 0) > 1 ? settings?.contestName?.split(" ").slice(-1)[0] : ""}
+              {lang === "sk" ? settings?.contestNameSk : settings?.contestNameEn}
             </div>
           </button>
           
@@ -183,7 +180,7 @@ export default function App() {
             </label>
             <div className="text-[12px] leading-relaxed opacity-80">
               <p>{settings?.edition}</p>
-              <p>{settings?.museumName.split(" - ")[1] || "Liptovský Mikuláš"}</p>
+              <p>{lang === "sk" ? settings?.museumNameSk : settings?.museumNameEn}</p>
               <p className="mt-2 font-bold uppercase tracking-tighter">SMOPAJ</p>
             </div>
           </div>

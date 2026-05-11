@@ -20,6 +20,30 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  app.use(express.json());
+  app.use(express.urlencoded({ extended: true }));
+
+  // Track visits
+  app.use((req, res, next) => {
+    const p = req.path;
+    if (p === "/" || p === "/index.html" || p.startsWith("/admin")) {
+      try {
+        const ip = getClientIp(req);
+        const date = new Date().toISOString().split("T")[0];
+        const ua = (req.headers["user-agent"] || "unknown").replace(/,/g, " ");
+        fs.appendFileSync(VISITS_CSV, `${date},${ip},${ua}\n`);
+      } catch (e) {
+        // Ignore logging errors
+      }
+    }
+    next();
+  });
+
+  // Helper to get client IP
+  const getClientIp = (req: express.Request) => {
+    return (req.headers["x-forwarded-for"] as string || req.socket.remoteAddress || "unknown").split(",")[0];
+  };
+
   // Directories for storage
   const UPLOADS_DIR = path.join(__dirname, "uploads");
   const DATA_DIR = path.join(__dirname, "data");
@@ -81,11 +105,12 @@ async function startServer() {
   }
   console.log("Data files initialized");
 
-  app.use(express.json());
+  console.log("Data files initialized");
   console.log("Middlewares configured");
   
-  // Serve uploaded photos
-  app.use("/uploads", express.static(UPLOADS_DIR));
+  // Direct access to /uploads is disabled for security. 
+  // Photos are served via /api/photo/:id proxy with anti-hotlinking.
+  // app.use("/uploads", express.static(UPLOADS_DIR));
 
   // Configure Multer
   const storage = multer.diskStorage({
@@ -98,7 +123,7 @@ async function startServer() {
 
   const upload = multer({
     storage,
-    limits: { fileSize: 12 * 1024 * 1024 }, // 12MB
+    limits: { fileSize: 500 * 1024 * 1024 }, // 500MB
     fileFilter: (req, file, cb) => {
       const allowed = [".jpg", ".jpeg", ".png", ".tiff", ".tif"];
       const ext = path.extname(file.originalname).toLowerCase();
@@ -111,6 +136,11 @@ async function startServer() {
   });
 
 const SETTINGS_JSON = path.join(DATA_DIR, "settings.json");
+const VISITS_CSV = path.join(DATA_DIR, "visits.csv");
+
+// Initialize storage files
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
+if (!fs.existsSync(VISITS_CSV)) fs.writeFileSync(VISITS_CSV, "date,ip,ua\n");
 
 const getTransporter = (settings: any) => {
   const host = process.env.SMTP_HOST || settings.smtpHost;
@@ -132,18 +162,23 @@ const getTransporter = (settings: any) => {
 // Default settings
 const DEFAULT_SETTINGS = {
   // Public settings
-  contestName: "Speleofotografia 2025",
-  museumName: "Slovenské múzeum ochrany prírody a jaskyniarstva",
+  contestNameSk: "Speleofotografia 2026",
+  contestNameEn: "Speleophotography 2026",
+  museumNameSk: "Slovenské múzeum ochrany prírody a jaskyniarstva",
+  museumNameEn: "Slovak Museum of Nature Protection and Caving",
   edition: "23. ročník",
   contestStatus: "submissions",
   submissionStart: "",
   submissionEnd: "",
   judgingStart: "",
-  judgingEnd: "",
+  judgingEnd: "2026-05-31",
   categories: [
-    { id: "A", name: "Krása jaskýň / Cave Beauty" },
-    { id: "B", name: "Speleomoment / Speleomoment" }
+    { id: "A", nameSk: "Krása jaskýň", nameEn: "Beauty of Caves", minDesc: 100, maxDesc: 5000, descRequired: true },
+    { id: "B", nameSk: "Jaskyniari", nameEn: "Cavers", minDesc: 0, maxDesc: 5000, descRequired: false },
+    { id: "C", nameSk: "Kras v krajine", nameEn: "Karst in Landscape", minDesc: 0, maxDesc: 5000, descRequired: false }
   ],
+  watermarkFontSize: 24,
+  watermarkColor: "rgba(255,255,255,0.4)",
   fieldRequirements: {
     author: true,
     email: true,
@@ -191,7 +226,7 @@ Zloženie poroty: Pavol Kočiš (SK – predseda), Marek Audy (CZ), Cosmin Bergh
 Vyhlásenie výsledkov: November 2026, SMOPaJ Liptovský Mikuláš.`,
   debugMode: false,
   maxPhotosPerCategory: "5",
-  watermarkTemplate: "$author | Speleofotografia 2026",
+  watermarkTemplate: "Speleofotografia 2026",
   logoUrl: "",
   
   // SMTP Settings
@@ -216,8 +251,10 @@ app.get("/api/settings", (req, res) => {
   const allSettings = JSON.parse(fs.readFileSync(SETTINGS_JSON, "utf8"));
   // Return only fields safe for the public registration form
   const publicFields = [
-    "contestName", 
-    "museumName", 
+    "contestNameSk", 
+    "contestNameEn", 
+    "museumNameSk", 
+    "museumNameEn", 
     "edition", 
     "contestStatus",
     "submissionStart",
@@ -511,7 +548,15 @@ app.post("/api/admin/login", (req, res) => {
   });
 
   // Registration endpoint
-  app.post("/api/register", upload.array("photos", 10), async (req, res) => {
+  app.post("/api/register", (req, res, next) => {
+    upload.array("photos", 10)(req, res, (err) => {
+      if (err instanceof multer.MulterError) {
+        if (err.code === "LIMIT_FILE_SIZE") return res.status(400).json({ error: "Súbor je príliš veľký (max 500MB)" });
+        return res.status(400).json({ error: err.message });
+      } else if (err) return res.status(500).json({ error: err.message });
+      next();
+    });
+  }, async (req, res) => {
     try {
       const body = req.body;
       const files = req.files as Express.Multer.File[];
@@ -586,7 +631,7 @@ app.post("/api/admin/login", (req, res) => {
         const svgWatermark = `
           <svg width="${wWidth}" height="100">
             <style>
-              .text { fill: rgba(255,255,255,0.4); font-family: sans-serif; font-size: 24px; font-weight: bold; }
+              .text { fill: ${settings.watermarkColor || "rgba(255,255,255,0.4)"}; font-family: sans-serif; font-size: ${settings.watermarkFontSize || 24}px; font-weight: bold; }
             </style>
             <text x="${wX}" y="80" text-anchor="end" class="text">${watermarkText}</text>
           </svg>
@@ -619,7 +664,7 @@ app.post("/api/admin/login", (req, res) => {
           `"${photoInfo.description.replace(/"/g, '""')}"`,
           `"${JSON.stringify(metadata).replace(/"/g, '""')}"`,
           timestamp,
-          "false" // shortlisted
+          "true" // shortlisted
         ].join(",");
         rows.push(row);
       }
@@ -743,7 +788,10 @@ app.post("/api/admin/login", (req, res) => {
 
       // If in final judging session, only show shortlisted photos
       if (settings.contestStatus === "judging") {
-        photos = photos.filter(p => p.shortlisted);
+        const hasShortlisted = photos.some(p => p.shortlisted);
+        if (hasShortlisted) {
+          photos = photos.filter(p => p.shortlisted);
+        }
       }
 
       // Shuffle randomized
@@ -760,6 +808,36 @@ app.post("/api/admin/login", (req, res) => {
   });
 
   // Public: Get anonymized and randomized photos for the whole contest
+  // Secure Photo Proxy: Prevents direct hotlinking and hides real paths
+  app.get("/api/photo/:id", (req, res) => {
+    try {
+      const { id } = req.params;
+      const filename = id.includes(".") ? id : `${id}.webp`;
+      
+      // Simple anti-hotlinking: Check if referer is from our site
+      const referer = req.headers.referer || "";
+      const host = req.headers.host || "";
+      
+      // Bypass referer check in development or for admin requests
+      const isDevelopment = process.env.NODE_ENV !== "production";
+      const isInternal = referer.includes(host) || !referer; 
+
+      if (!isDevelopment && referer && !isInternal) {
+        console.warn(`Hotlinking blocked for ${filename} from ${referer}`);
+        return res.status(403).send("Forbidden");
+      }
+
+      const filePath = path.join(UPLOADS_DIR, filename);
+      if (fs.existsSync(filePath)) {
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+        return res.sendFile(filePath);
+      }
+      res.status(404).send("Not found");
+    } catch (e) {
+      res.status(500).send("Error");
+    }
+  });
+
   app.get("/api/public/gallery", (req, res) => {
     try {
       if (!fs.existsSync(REGISTRATIONS_CSV)) return res.json([]);
@@ -772,9 +850,9 @@ app.post("/api/admin/login", (req, res) => {
         return {
           id: parts[0],
           category: parts[8],
-          name: parts[9].replace(/^"|"$/g, '').replace(/""/g, '"'),
+          name: parts[9] ? parts[9].replace(/^"|"$/g, '').replace(/""/g, '"') : "",
           webPath: parts[11],
-          description: parts[12].replace(/^"|"$/g, '').replace(/""/g, '"'),
+          description: parts[12] ? parts[12].replace(/^"|"$/g, '').replace(/""/g, '"') : "",
         };
       });
 
@@ -793,10 +871,25 @@ app.post("/api/admin/login", (req, res) => {
   // Public: Vote for a photo
   app.post("/api/public/vote", (req, res) => {
     try {
-      const { photoId } = req.body;
+      const { photoId, fingerprint } = req.body;
       if (!photoId) return res.status(400).json({ error: "Chýbajúce údaje" });
 
-      const row = `${photoId},${new Date().toISOString()}\n`;
+      const ip = getClientIp(req);
+      const voterId = fingerprint || ip; // Use fingerprint if available, fallback to IP
+
+      // Check if already voted in current session (simple CSV scan for demo, ideally a Set or DB)
+      if (fs.existsSync(PUBLIC_VOTES_CSV)) {
+        const votes = fs.readFileSync(PUBLIC_VOTES_CSV, "utf8").split("\n");
+        const alreadyVoted = votes.some(v => {
+          const [pid, , vip] = v.split(",");
+          return pid === photoId && vip === voterId;
+        });
+        if (alreadyVoted) {
+          return res.status(429).json({ error: "Z tohto zariadenia ste už za túto fotku hlasovali" });
+        }
+      }
+
+      const row = `${photoId},${new Date().toISOString()},${voterId}\n`;
       fs.appendFileSync(PUBLIC_VOTES_CSV, row);
 
       res.json({ success: true });
@@ -818,13 +911,165 @@ app.post("/api/admin/login", (req, res) => {
       
       const counts: Record<string, number> = {};
       votesLines.forEach(line => {
-        const [photoId] = line.split(",");
+        const parts = line.split(",");
+        const photoId = parts[0];
         counts[photoId] = (counts[photoId] || 0) + 1;
       });
 
       res.json(counts);
     } catch (e) {
       res.json({});
+    }
+  });
+
+  // Admin: Get jury evaluation results
+  app.get("/api/admin/dashboard-stats", (req, res) => {
+    try {
+      const settings = JSON.parse(fs.readFileSync(SETTINGS_JSON, "utf8"));
+      const registrations = fs.existsSync(REGISTRATIONS_CSV) ? fs.readFileSync(REGISTRATIONS_CSV, "utf8").trim().split("\n").slice(1) : [];
+      const visits = fs.existsSync(VISITS_CSV) ? fs.readFileSync(VISITS_CSV, "utf8").trim().split("\n").slice(1) : [];
+      const publicVotes = fs.existsSync(PUBLIC_VOTES_CSV) ? fs.readFileSync(PUBLIC_VOTES_CSV, "utf8").trim().split("\n").slice(1) : [];
+
+      const totalPhotos = registrations.length;
+      const uniqueAuthors = new Set(registrations.map(l => l.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/)[2])).size;
+      const totalPublicVotes = publicVotes.length;
+
+      // Activity for the last 14 days
+      const last14Days = Array.from({ length: 14 }).map((_, i) => {
+        const d = new Date();
+        d.setDate(d.getDate() - (13 - i));
+        return d.toISOString().split("T")[0];
+      });
+
+      const visitsByDay = last14Days.map(day => ({
+        day,
+        visits: visits.filter(v => v.startsWith(day)).length,
+        votes: publicVotes.filter(v => {
+            const parts = v.split(",");
+            return parts[1] && parts[1].startsWith(day);
+        }).length
+      }));
+
+      res.json({
+        totalPhotos,
+        uniqueAuthors,
+        totalPublicVotes,
+        dailyAccess: visitsByDay[13].visits,
+        activity: visitsByDay
+      });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: "Failed to fetch dashboard stats" });
+    }
+  });
+
+  // Admin: Get jury evaluation results
+  app.get("/api/admin/jury-results", (req, res) => {
+    try {
+      if (!fs.existsSync(RATINGS_CSV)) return res.json([]);
+      const data = fs.readFileSync(RATINGS_CSV, "utf8");
+      const lines = data.trim().split("\n").slice(1);
+      
+      const summary: Record<string, { total: number, count: number }> = {};
+      lines.forEach(l => {
+        const parts = l.split(",");
+        const pid = parts[2];
+        const score = parseInt(parts[3]);
+        if (pid && !isNaN(score)) {
+          if (!summary[pid]) summary[pid] = { total: 0, count: 0 };
+          summary[pid].total += score;
+          summary[pid].count += 1;
+        }
+      });
+
+      const results = Object.entries(summary).map(([id, s]) => ({
+        id,
+        avg: parseFloat((s.total / s.count).toFixed(2)),
+        votes: s.count
+      })).sort((a, b) => b.avg - a.avg);
+
+      res.json(results);
+    } catch (e) {
+      res.status(500).json({ error: "Chyba pri výpočte výsledkov" });
+    }
+  });
+
+  app.get("/api/admin/stats", (req, res) => {
+    try {
+      const stats: any = {
+        totalPhotos: 0,
+        totalVotes: 0,
+        totalVisits: 0,
+        dailyVisits: {} as Record<string, number>,
+        dailyVotes: {} as Record<string, number>,
+        categoryStats: {} as Record<string, number>,
+      };
+
+      if (fs.existsSync(VISITS_CSV)) {
+        const visits = fs.readFileSync(VISITS_CSV, "utf8").trim().split("\n").slice(1);
+        stats.totalVisits = visits.length;
+        visits.forEach(v => {
+          const [date] = v.split(",");
+          stats.dailyVisits[date] = (stats.dailyVisits[date] || 0) + 1;
+        });
+      }
+
+      if (fs.existsSync(REGISTRATIONS_CSV)) {
+        const lines = fs.readFileSync(REGISTRATIONS_CSV, "utf8").trim().split("\n").slice(1);
+        stats.totalPhotos = lines.length;
+        lines.forEach(l => {
+          const parts = l.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+          const cat = parts[8] || "N/A";
+          stats.categoryStats[cat] = (stats.categoryStats[cat] || 0) + 1;
+        });
+      }
+
+      if (fs.existsSync(PUBLIC_VOTES_CSV)) {
+        const votes = fs.readFileSync(PUBLIC_VOTES_CSV, "utf8").trim().split("\n").slice(1);
+        stats.totalVotes = votes.length;
+        votes.forEach(v => {
+          const parts = v.split(",");
+          const date = parts[1] ? parts[1].split("T")[0] : "unknown";
+          stats.dailyVotes[date] = (stats.dailyVotes[date] || 0) + 1;
+        });
+      }
+
+      res.json(stats);
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: "Failed to load stats" });
+    }
+  });
+
+  app.get("/api/admin/export/results-csv", (req, res) => {
+    try {
+      if (!fs.existsSync(REGISTRATIONS_CSV)) return res.status(404).send("No data");
+      const photosData = fs.readFileSync(REGISTRATIONS_CSV, "utf8").trim().split("\n").slice(1);
+      const ratingsData = fs.existsSync(RATINGS_CSV) ? fs.readFileSync(RATINGS_CSV, "utf8").trim().split("\n").slice(1) : [];
+      const votesData = fs.existsSync(PUBLIC_VOTES_CSV) ? fs.readFileSync(PUBLIC_VOTES_CSV, "utf8").trim().split("\n").slice(1) : [];
+      const juryRatings: Record<string, number[]> = {};
+      ratingsData.forEach(r => {
+        const p = r.split(",");
+        if (!juryRatings[p[2]]) juryRatings[p[2]] = [];
+        juryRatings[p[2]].push(parseInt(p[3]));
+      });
+      const publicVotes: Record<string, number> = {};
+      votesData.forEach(v => {
+        const pid = v.split(",")[0];
+        publicVotes[pid] = (publicVotes[pid] || 0) + 1;
+      });
+      let csv = "ID,Author,Category,Photo Name,Jury Average,Jury Votes,Public Votes\n";
+      photosData.forEach(line => {
+        const p = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+        const pid = p[0];
+        const scores = juryRatings[pid] || [];
+        const avg = scores.length > 0 ? (scores.reduce((a,b)=>a+b,0)/scores.length).toFixed(2) : "0";
+        csv += `${pid},"${(p[1]||"").replace(/"/g,'')}",${p[8]},"${(p[9]||"").replace(/"/g,'')}",${avg},${scores.length},${publicVotes[pid]||0}\n`;
+      });
+      res.attachment("vysledky_sutaze.csv");
+      res.send(csv);
+    } catch (e) {
+      res.status(500).send("Export failed");
     }
   });
 
@@ -900,6 +1145,86 @@ app.post("/api/admin/login", (req, res) => {
     }
   });
 
+  app.post("/api/admin/photos/bulk-delete", (req, res) => {
+    try {
+      const { ids } = req.body;
+      if (!Array.isArray(ids) || ids.length === 0) {
+        return res.status(400).json({ error: "No IDs provided" });
+      }
+
+      if (!fs.existsSync(REGISTRATIONS_CSV)) return res.status(404).json({ error: "Not found" });
+      
+      const data = fs.readFileSync(REGISTRATIONS_CSV, "utf8");
+      const lines = data.trim().split("\n");
+      const header = lines[0];
+      const registrations = lines.slice(1);
+
+      const idSet = new Set(ids);
+      const remaining: string[] = [];
+      const toDelete: string[] = [];
+
+      for (const line of registrations) {
+        const id = line.split(",")[0];
+        if (idSet.has(id)) {
+          toDelete.push(line);
+        } else {
+          remaining.push(line);
+        }
+      }
+
+      for (const line of toDelete) {
+        const parts = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+        const originalName = parts[10];
+        const webName = parts[11];
+        if (originalName) {
+           const op = path.join(UPLOADS_DIR, originalName);
+           if (fs.existsSync(op)) fs.unlinkSync(op);
+        }
+        if (webName) {
+           const wp = path.join(UPLOADS_DIR, webName);
+           if (fs.existsSync(wp)) fs.unlinkSync(wp);
+        }
+      }
+
+      fs.writeFileSync(REGISTRATIONS_CSV, header + "\n" + remaining.join("\n") + (remaining.length ? "\n" : ""));
+      res.json({ success: true, count: toDelete.length });
+    } catch (e) {
+      console.error("Bulk delete error:", e);
+      res.status(500).json({ error: "Chyba pri hromadnom mazaní" });
+    }
+  });
+
+  app.post("/api/admin/photos/delete-all", (req, res) => {
+    try {
+      if (!fs.existsSync(REGISTRATIONS_CSV)) return res.json({ success: true, count: 0 });
+      
+      const data = fs.readFileSync(REGISTRATIONS_CSV, "utf8");
+      const lines = data.trim().split("\n");
+      const header = lines[0];
+      const registrations = lines.slice(1);
+
+      for (const line of registrations) {
+        const parts = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+        const originalName = parts[10];
+        const webName = parts[11];
+        if (originalName) {
+           const op = path.join(UPLOADS_DIR, originalName);
+           if (fs.existsSync(op)) fs.unlinkSync(op);
+        }
+        if (webName) {
+           const wp = path.join(UPLOADS_DIR, webName);
+           if (fs.existsSync(wp)) fs.unlinkSync(wp);
+        }
+      }
+
+      fs.writeFileSync(REGISTRATIONS_CSV, header + "\n");
+      res.json({ success: true, count: registrations.length });
+    } catch (e) {
+      console.error("Delete all error:", e);
+      res.status(500).json({ error: "Chyba pri mazaní všetkého" });
+    }
+  });
+
   app.delete("/api/admin/photos/:id", (req, res) => {
     try {
       const { id } = req.params;
@@ -968,6 +1293,134 @@ app.post("/api/admin/login", (req, res) => {
       res.status(500).json({ error: "Chyba pri aktualizácii" });
     }
   });
+  // Direct bulk upload for testing from computer
+  app.post("/api/admin/bulk-upload", (req, res, next) => {
+    upload.array("photos")(req, res, (err) => {
+      if (err instanceof multer.MulterError) {
+        if (err.code === "LIMIT_FILE_SIZE") return res.status(400).json({ error: "Súbor je príliš veľký (max 500MB)" });
+        return res.status(400).json({ error: err.message });
+      } else if (err) return res.status(500).json({ error: err.message });
+      next();
+    });
+  }, async (req, res) => {
+    try {
+      const files = req.files as Express.Multer.File[];
+      if (!files || files.length === 0) return res.status(400).json({ error: "No files" });
+      const result = await processStressFiles(files);
+      res.json(result);
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: "Bulk upload failed" });
+    }
+  });
+
+  // Stress test import from /demo directory
+  app.post("/api/admin/stress-upload", async (req, res) => {
+    try {
+      const demoDir = path.join(__dirname, "demo");
+      if (!fs.existsSync(demoDir)) {
+        return res.status(404).json({ error: "Demo directory not found at " + demoDir });
+      }
+      
+      const files = fs.readdirSync(demoDir).filter(f => f.match(/\.(jpg|jpeg|png)$/i));
+      if (files.length === 0) {
+        return res.status(400).json({ error: "No image files found in demo directory" });
+      }
+
+      // Convert local files to mock Multer objects for processStressFiles
+      const mockFiles = files.map(filename => {
+        const filePath = path.join(demoDir, filename);
+        const destPath = path.join(UPLOADS_DIR, `temp_${uuidv4()}${path.extname(filename)}`);
+        fs.copyFileSync(filePath, destPath);
+        return {
+          path: destPath,
+          originalname: filename
+        } as Express.Multer.File;
+      });
+
+      const result = await processStressFiles(mockFiles);
+      res.json(result);
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: "Stress import failed" });
+    }
+  });
+
+  // Helper for processing stress test files
+  async function processStressFiles(files: Express.Multer.File[]) {
+    const settings = JSON.parse(fs.readFileSync(SETTINGS_JSON, "utf8"));
+    const rows: string[] = [];
+    const timestamp = new Date().toISOString();
+    const dummyAuthors = ["Janko Hraško", "Ferko Mrkvička", "Zuzka Veselá", "Peter Jaskyniar", "Anna Hlboká", "Elena Speleo", "Marek Jaskyňa"];
+    
+    const results: any[] = [];
+    console.log(`Starting stress process for ${files.length} files...`);
+
+    for (const file of files) {
+      try {
+        const photoId = uuidv4();
+        const author = dummyAuthors[Math.floor(Math.random() * dummyAuthors.length)];
+        
+        let category = settings.categories?.[0]?.id || "A";
+        const baseName = file.originalname.toUpperCase();
+        if (baseName.startsWith("B")) category = "B";
+        else if (baseName.startsWith("A")) category = "A";
+
+        const ext = path.extname(file.originalname);
+        const newOriginalName = `stress_${category}_${photoId}${ext}`;
+        const newOriginalPath = path.join(UPLOADS_DIR, newOriginalName);
+        
+        fs.renameSync(file.path, newOriginalPath);
+
+        const webName = `${photoId}.webp`;
+        const webPath = path.join(UPLOADS_DIR, webName);
+
+        let watermarkStatus = "success";
+        try {
+          await sharp(newOriginalPath)
+            .resize({ width: 2200, height: 2200, fit: 'inside', withoutEnlargement: true })
+            .webp({ quality: 80 })
+            .composite([{
+              input: Buffer.from(`
+                <svg width="800" height="100">
+                  <text x="780" y="80" text-anchor="end" font-family="sans-serif" font-size="${settings.watermarkFontSize || 24}" font-weight="bold" fill="${settings.watermarkColor || "rgba(255,255,255,0.4)"}">${settings.watermarkTemplate || "Speleofotografia 2026"}</text>
+                </svg>
+              `),
+              gravity: 'southeast',
+            }])
+            .toFile(webPath);
+        } catch (sharpErr) {
+          console.warn(`Sharp failed for ${file.originalname}, using fallback`, sharpErr);
+          fs.copyFileSync(newOriginalPath, webPath);
+          watermarkStatus = "fallback (no watermark)";
+        }
+
+        const originalName = file.originalname;
+        // Basic encoding fix: if it looks like broken UTF-8 interpreted as Latin1
+        const safeOriginalName = Buffer.from(originalName, 'binary').toString('utf8').replace(/[^\x20-\x7E\u00A0-\u017F]/g, '');
+
+        const row = [
+          photoId, `"${author}"`, `"stress@test.com"`, `""`, `""`, `"Stress Test St 1"`,
+          "true", "true", category, `"${safeOriginalName.replace(/"/g, '""')}"`,
+          newOriginalName, webName, `"Stress test import"`, `"{}"`, timestamp, "true"
+        ].join(",");
+        rows.push(row);
+        
+        results.push({ name: safeOriginalName, status: "success", watermark: watermarkStatus });
+        console.log(`[OK] Processed ${safeOriginalName} -> ${category}`);
+      } catch (err: any) {
+        console.error(`[ERROR] Failed to process ${file.originalname}:`, err);
+        results.push({ name: file.originalname, status: "error", error: err.message });
+      }
+    }
+
+    if (rows.length > 0) {
+      fs.appendFileSync(REGISTRATIONS_CSV, rows.join("\n") + "\n");
+    }
+    
+    return { count: rows.length, details: results };
+  }
+
 
   app.post("/api/admin/generate-test-data", (req, res) => {
     try {
@@ -1050,8 +1503,33 @@ app.post("/api/admin/login", (req, res) => {
   app.post("/api/rate", (req, res) => {
     const { evalId, evalName, photoId, score } = req.body;
     const timestamp = new Date().toISOString();
-    fs.appendFileSync(RATINGS_CSV, `${evalId},${evalName},${photoId},${score},${timestamp}\n`);
-    res.json({ success: true });
+    
+    try {
+      let content = "";
+      if (fs.existsSync(RATINGS_CSV)) {
+        content = fs.readFileSync(RATINGS_CSV, "utf8");
+      }
+      
+      const lines = content.trim().split("\n");
+      const header = lines[0] || "evalId,evalName,photoId,score,createdAt";
+      
+      // Filter out previous rating from this evaluator for this photo
+      const otherLines = lines.slice(1).filter(line => {
+        if (!line.trim()) return false;
+        const parts = line.split(",");
+        // evalId is index 0, photoId is index 2
+        return !(parts[0] === evalId && parts[2] === photoId);
+      });
+      
+      const newLine = `${evalId},${evalName},${photoId},${score},${timestamp}`;
+      const newContent = [header, ...otherLines, newLine].filter(l => l.trim()).join("\n") + "\n";
+      
+      fs.writeFileSync(RATINGS_CSV, newContent);
+      res.json({ success: true });
+    } catch (e) {
+      console.error("Error saving rating:", e);
+      res.status(500).json({ error: "Chyba pri ukladaní hodnotenia" });
+    }
   });
 
   // Evaluator: Get my ratings
