@@ -6,7 +6,7 @@ import multer from "multer";
 import nodemailer from "nodemailer";
 import sharp from "sharp";
 import exif from "exif-reader";
-import archiver from "archiver";
+import { ZipArchive } from "archiver";
 import { v4 as uuidv4 } from "uuid";
 import { fileURLToPath } from "url";
 
@@ -202,6 +202,10 @@ app.get("/api/settings", (req, res) => {
     "museumName", 
     "edition", 
     "contestStatus",
+    "submissionStart",
+    "submissionEnd",
+    "judgingStart",
+    "judgingEnd",
     "categories",
     "fieldRequirements",
     "rulesSk", 
@@ -554,17 +558,33 @@ app.post("/api/admin/login", (req, res) => {
         const watermarkText = (settings.watermarkTemplate || "$author")
           .replace("$author", body.author);
 
-        // SVG overlay for watermark
+        // Get dimensions to ensure watermark fits
+        const imageForWeb = sharp(newOriginalPath);
+        const webMeta = await imageForWeb.metadata();
+        let targetWidth = webMeta.width || 2200;
+        let targetHeight = webMeta.height || 2200;
+        
+        // Match sharp's 'inside' resize logic
+        if (targetWidth > 2200 || targetHeight > 2200) {
+          const ratio = Math.min(2200 / targetWidth, 2200 / targetHeight);
+          targetWidth = Math.floor(targetWidth * ratio);
+          targetHeight = Math.floor(targetHeight * ratio);
+        }
+
+        const wWidth = Math.min(targetWidth, 1000);
+        const wX = wWidth - 20;
+
+        // SVG overlay for watermark - width must be <= targetWidth
         const svgWatermark = `
-          <svg width="1000" height="100">
+          <svg width="${wWidth}" height="100">
             <style>
               .text { fill: rgba(255,255,255,0.4); font-family: sans-serif; font-size: 24px; font-weight: bold; }
             </style>
-            <text x="980" y="80" text-anchor="end" class="text">${watermarkText}</text>
+            <text x="${wX}" y="80" text-anchor="end" class="text">${watermarkText}</text>
           </svg>
         `;
 
-        await sharp(newOriginalPath)
+        await imageForWeb
           .resize({ width: 2200, height: 2200, fit: 'inside', withoutEnlargement: true })
           .webp({ quality: 80 })
           .composite([{
@@ -811,7 +831,7 @@ app.post("/api/admin/login", (req, res) => {
 
   app.get("/api/admin/export/photos-zip", (req, res) => {
     try {
-      const archive = archiver("zip", { zlib: { level: 9 } });
+      const archive = new ZipArchive({ zlib: { level: 9 } });
       res.attachment("contest_photos.zip");
       archive.on("error", (err) => { throw err; });
       archive.pipe(res);

@@ -14,6 +14,35 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
   const [success, setSuccess] = useState(false);
   const [existingCounts, setExistingCounts] = useState<Record<string, number>>({});
   const [debugLoading, setDebugLoading] = useState(false);
+  const [timeLeft, setTimeLeft] = useState<{ days: number; hours: number; minutes: number; seconds: number } | null>(null);
+
+  useEffect(() => {
+    if (!settings?.submissionEnd) return;
+    
+    const end = new Date(settings.submissionEnd);
+    end.setHours(23, 59, 59, 999);
+
+    const updateTimer = () => {
+      const now = new Date();
+      const diff = end.getTime() - now.getTime();
+      
+      if (diff <= 0) {
+        setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+        return;
+      }
+      
+      setTimeLeft({
+        days: Math.floor(diff / (1000 * 60 * 60 * 24)),
+        hours: Math.floor((diff / (1000 * 60 * 60)) % 24),
+        minutes: Math.floor((diff / 1000 / 60) % 60),
+        seconds: Math.floor((diff / 1000) % 60),
+      });
+    };
+
+    updateTimer();
+    const interval = setInterval(updateTimer, 1000);
+    return () => clearInterval(interval);
+  }, [settings?.submissionEnd]);
 
   const generateTestData = async () => {
     if (!settings?.debugMode) return;
@@ -359,7 +388,17 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
           <p className="text-[11px] text-muted uppercase font-bold tracking-widest">
             {settings?.edition} - {settings?.museumName}
           </p>
-          <h2 className="text-3xl font-light tracking-tight">{lang === "sk" ? "Prihláška" : "Application Form"}</h2>
+          <div className="flex flex-col md:flex-row md:items-end gap-4">
+            <h2 className="text-3xl font-light tracking-tight">{lang === "sk" ? "Prihláška" : "Application Form"}</h2>
+            {timeLeft && (timeLeft.days > 0 || timeLeft.hours > 0 || timeLeft.minutes > 0 || timeLeft.seconds > 0) && (
+              <div className="flex items-center gap-2 mb-1 px-3 py-1.5 bg-red-50 border border-red-100 rounded-sm">
+                <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                <span className="text-[10px] font-bold uppercase tracking-widest text-red-600">
+                  {lang === "sk" ? "Uzávierka o:" : "Ends in:"} {timeLeft.days}d {timeLeft.hours}h {timeLeft.minutes}m {timeLeft.seconds}s
+                </span>
+              </div>
+            )}
+          </div>
         </div>
         {settings?.debugMode && (
           <button 
@@ -520,8 +559,10 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
                     handleFiles(files, cat.id);
                   }}
                   className={cn(
-                    "h-32 border-2 border-dashed flex flex-col items-center justify-center p-4 transition-all hover:bg-paper cursor-pointer rounded-none",
-                    isDragging ? "border-accent bg-accent/5" : "border-border"
+                    "h-40 border-2 flex flex-col items-center justify-center p-4 transition-all cursor-pointer rounded-none bg-accent/[0.02] hover:bg-accent/[0.06]",
+                    isDragging 
+                      ? "border-solid bg-accent/10 scale-[0.98] border-accent" 
+                      : "border-dashed animate-border-pulse"
                   )}
                   onClick={() => {
                     const input = document.createElement("input");
@@ -532,8 +573,11 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
                     input.click();
                   }}
                 >
-                  <Upload size={16} className="text-muted mb-2" />
-                  <p className="text-[9px] text-muted font-bold uppercase tracking-wider">{lang === "sk" ? "PRIDAŤ FOTKY" : "ADD PHOTOS"}</p>
+                  <div className="w-10 h-10 rounded-full bg-white shadow-sm flex items-center justify-center mb-3">
+                    <Upload size={20} className="text-accent" />
+                  </div>
+                  <p className="text-[11px] text-ink font-bold uppercase tracking-widest">{lang === "sk" ? "PRIDAŤ FOTKY" : "ADD PHOTOS"}</p>
+                  <p className="text-[9px] text-muted mt-1 uppercase tracking-widest">{lang === "sk" ? "Kliknite alebo pretiahnite súbory sem" : "Click or drag files here"}</p>
                 </div>
 
                 {/* Grid for uploaded photos in this category */}
