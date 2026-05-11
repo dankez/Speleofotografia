@@ -28,6 +28,8 @@ A web application for managing an international caving photography competition.
 - **Plná anonymita poroty**: Porotcovia vidia fotografie bez mien autorov a pôvodných názvov súborov pre zabezpečenie objektívneho hodnotenia.
 - **Jednoznačné hodnotenie**: Jeden unikátny odkaz porotcu umožňuje udeliť fotke práve jeden hlas; opätovné hlasovanie pôvodnú hodnotu prepíše (nepriemeruje sa).
 - **Izolácia nastavení**: Citlivé údaje (ako SMTP heslo alebo administrátorské prihlasovacie údaje) sú na strane servera chránené. 
+- **Anonymizované Photo Proxy**: Fotografie sú servované cez zabezpečené API, ktoré skrýva reálne cesty k súborom a zabraňuje priamemu hotlinkingu z cudzích webov.
+- **Optimalizácia výkonu**: Implementované HTTP cachovanie (24h) pre fotografie a `loading="lazy"` pre galérie, čo zabezpečuje rýchlejšie načítavanie a šetrí dáta užívateľov.
 - **Validácia**: Všetky vstupy od užívateľov sú sanitované pred uložením do systému.
 - **IFrame Security**: Použitie moderných atribútov (`referrerpolicy`, `loading="lazy"`) pre bezpečnú integráciu.
 - **Prístup**: Administrátorská časť je chránená e-mailom a heslom definovaným v systéme.
@@ -52,11 +54,15 @@ A web application for managing an international caving photography competition.
 - **Settings**: Manage competition metadata (name, edition), limits, and SMTP server configuration.
 - **Competition Rules**: Integrated Markdown editor for detailed rules displayed in a modal window.
 
-### Security and Privacy
+### Security, Performance and Anonymity
+- **Jury Anonymity**: Judges see photos without author names or original filenames to ensure objective evaluation.
+- **Idempotent Voting**: Each unique judge link allows exactly one vote per photo; re-rating overwrites the previous value instead of averaging.
+- **Secure Photo Proxy**: Photos are served via an API that hides real file paths and prevents hotlinking.
+- **Performance Optimization**: 24-hour HTTP caching for images and native `loading="lazy"` for all galleries ensure fast load times and reduced bandwidth usage.
 - **Settings Isolation**: Sensitive data (such as SMTP passwords or admin credentials) are protected server-side.
 - **Validation**: All user inputs are sanitized before being saved to the system.
-- **IFrame Security**: Implementation of modern security attributes for embedded content.
-- **Access Control**: The administration panel is secured with email and password authentication.
+- **IFrame Security**: Modern security attributes used for embedded content.
+- **Access Control**: Secure administration panel with email/password authentication.
 
 ---
 

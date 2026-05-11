@@ -1732,7 +1732,7 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                         </td>
                         <td className="p-4">
                           <div className="w-12 h-12 bg-paper border border-border overflow-hidden cursor-pointer" onClick={() => setSelectedPhoto(photo)}>
-                            <img src={`/uploads/${photo.webPath || photo.path}`} className="w-full h-full object-cover" alt="" />
+                            <img src={`/uploads/${photo.webPath || photo.path}`} className="w-full h-full object-cover" alt="" loading="lazy" />
                           </div>
                         </td>
                         <td className="p-4">

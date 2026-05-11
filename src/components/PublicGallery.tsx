@@ -167,6 +167,7 @@ export default function PublicGallery({ lang }: { lang: Lang }) {
               src={`/uploads/${photo.webPath || (photo.id + ".webp")}`} 
               className="w-full h-auto grayscale-[30%] md:grayscale-[50%] group-hover:grayscale-0 transition-all duration-500"
               alt={photo.name}
+              loading="lazy"
             />
             
             {/* Overlay - always visible on mobile, hover on desktop */}
