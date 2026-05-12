@@ -325,9 +325,7 @@ app.post("/api/admin/upload-logo", upload.single("logo"), (req, res) => {
 // Admin login
 app.post("/api/admin/login", (req, res) => {
     const { email, password } = req.body;
-    console.log(`Login attempt for: "${email}"`);
     if (!email || !password) {
-      console.log("Login failed: Missing email or password");
       return res.status(401).json({ error: "Chýbajúce údaje / Missing credentials" });
     }
     try {
@@ -338,10 +336,8 @@ app.post("/api/admin/login", (req, res) => {
       );
       
       if (admin) {
-        console.log(`Login success for: ${email}`);
         res.json({ success: true, email: admin.email, role: admin.role });
       } else {
-        console.log(`Login failed for: ${email} - invalid credentials`);
         res.status(401).json({ error: "Nesprávne údaje / Incorrect credentials" });
       }
     } catch (e) {
