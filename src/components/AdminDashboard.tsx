@@ -305,7 +305,11 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
   };
 
   const exportResults = () => {
-    window.location.href = "/api/admin/export-results";
+    window.location.href = "/api/admin/export/results-csv";
+  };
+
+  const downloadTotalArchive = () => {
+    window.location.href = "/api/admin/export/total-archive";
   };
 
   const fetchData = async () => {
@@ -569,7 +573,7 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
               { id: "evaluators", label: lang === "sk" ? "Porota" : "Jury", icon: Users },
               { id: "embed", label: lang === "sk" ? "Prepojenie" : "Embed", icon: Code },
               { id: "settings", label: lang === "sk" ? "Nastavenia" : "Settings", icon: SettingsIcon },
-              { id: "stress", label: lang === "sk" ? "Stress Test" : "Stress Test", icon: Zap },
+              ...(settings.debugMode ? [{ id: "stress", label: lang === "sk" ? "Stress Test" : "Stress Test", icon: Zap }] : []),
             ].map(tab => (
             <button
               key={tab.id}
@@ -1236,26 +1240,43 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
               </div>
             </div>
 
-            {/* Export Actions */}
-            <div className="flex flex-col md:flex-row gap-6 p-8 bg-ink text-white items-center justify-between rounded-sm">
-              <div className="space-y-2 text-center md:text-left">
-                <h4 className="text-sm font-bold uppercase tracking-[3px]">Exportovať výsledky súťaže</h4>
-                <p className="text-[11px] opacity-70 max-w-md">
-                  Kompletná databáza fotiek, autorov, bodového hodnotenia a poradia. Formát CSV je kompatibilný s Excelom a Google Sheets.
-                </p>
+            <div className="space-y-6 mt-12">
+              <div className="flex flex-col md:flex-row gap-6 p-8 bg-paper border border-border items-center justify-between rounded-sm">
+                <div className="space-y-2 text-center md:text-left">
+                  <h4 className="text-sm font-bold uppercase tracking-[3px] text-ink">Tabuľka výsledkov (.CSV)</h4>
+                  <p className="text-[11px] text-muted max-w-md">
+                    Základný prehľad s bodmi a umiestnením pre rýchly import do Excelu.
+                  </p>
+                </div>
+                <button 
+                  onClick={exportResults}
+                  className="flex items-center gap-3 px-10 py-4 bg-white border border-border text-ink text-[11px] font-bold uppercase tracking-widest hover:bg-paper transition-colors"
+                >
+                  <Download size={16} />
+                  Download CSV
+                </button>
               </div>
-              <button 
-                onClick={exportResults}
-                className="flex items-center gap-3 px-10 py-4 bg-white text-ink text-[11px] font-bold uppercase tracking-widest hover:bg-paper transition-colors"
-              >
-                <Download size={16} />
-                Download CSV
-              </button>
+
+              <div className="flex flex-col md:flex-row gap-6 p-8 border-2 border-dashed border-border items-center justify-between rounded-sm">
+                <div className="space-y-2 text-center md:text-left">
+                  <h4 className="text-sm font-bold uppercase tracking-[3px] text-ink">Kompletný archív (.ZIP)</h4>
+                  <p className="text-[11px] text-muted max-w-md">
+                    Všetky súťažné fotografie roztriedené do priečinkov + podrobné tabuľky s hlasovaním poroty.
+                  </p>
+                </div>
+                <button 
+                  onClick={downloadTotalArchive}
+                  className="flex items-center gap-3 px-10 py-4 bg-ink text-white text-[11px] font-bold uppercase tracking-widest hover:opacity-90 transition-opacity"
+                >
+                  <Download size={16} />
+                  Download ZIP
+                </button>
+              </div>
             </div>
           </div>
         )}
 
-        {activeTab === "stress" && (
+        {activeTab === "stress" && settings.debugMode && (
           <div className="max-w-3xl space-y-10">
             <div className="space-y-6">
               <h3 className="text-[11px] font-bold uppercase tracking-[2px] text-muted border-b border-border pb-2 flex items-center gap-2">

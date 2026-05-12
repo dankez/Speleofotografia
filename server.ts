@@ -6,10 +6,13 @@ import multer from "multer";
 import nodemailer from "nodemailer";
 import sharp from "sharp";
 import exif from "exif-reader";
-import { ZipArchive } from "archiver";
 import { v4 as uuidv4 } from "uuid";
 import { fileURLToPath } from "url";
+import { createRequire } from "module";
 import "dotenv/config";
+
+const require = createRequire(import.meta.url);
+const archiver = require("archiver");
 
 console.log("Modules loaded");
 
@@ -58,6 +61,16 @@ async function startServer() {
   const ADMINS_JSON = path.join(DATA_DIR, "admins.json");
   const INVITATIONS_JSON = path.join(DATA_DIR, "invitations.json");
   const PUBLIC_VOTES_CSV = path.join(DATA_DIR, "public_votes.csv");
+  
+  // Helper to remove diacritics and special characters for safe filenames
+  const removeDiacritics = (str: string) => {
+    return str
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "") // Remove accents
+      .replace(/[^a-zA-Z0-9.\-_ ]/g, "_") // Replace other special chars with underscore
+      .replace(/\s+/g, "_") // Replace spaces with underscore
+      .trim();
+  };
 
   // Initialize CSVs with headers if they don't exist
   if (!fs.existsSync(REGISTRATIONS_CSV)) {
@@ -1047,18 +1060,21 @@ app.post("/api/admin/login", (req, res) => {
       const photosData = fs.readFileSync(REGISTRATIONS_CSV, "utf8").trim().split("\n").slice(1);
       const ratingsData = fs.existsSync(RATINGS_CSV) ? fs.readFileSync(RATINGS_CSV, "utf8").trim().split("\n").slice(1) : [];
       const votesData = fs.existsSync(PUBLIC_VOTES_CSV) ? fs.readFileSync(PUBLIC_VOTES_CSV, "utf8").trim().split("\n").slice(1) : [];
+      
       const juryRatings: Record<string, number[]> = {};
       ratingsData.forEach(r => {
         const p = r.split(",");
-        if (!juryRatings[p[2]]) juryRatings[p[2]] = [];
-        juryRatings[p[2]].push(parseInt(p[3]));
+        if (!juryRatings[p[0]]) juryRatings[p[0]] = [];
+        juryRatings[p[0]].push(parseInt(p[3]));
       });
+
       const publicVotes: Record<string, number> = {};
       votesData.forEach(v => {
         const pid = v.split(",")[0];
         publicVotes[pid] = (publicVotes[pid] || 0) + 1;
       });
-      let csv = "ID,Author,Category,Photo Name,Jury Average,Jury Votes,Public Votes\n";
+
+      let csv = "\uFEFFID,Autor,Kategória,Názov diela,Priemer poroty,Počet hlasov poroty,Hlasy verejnosti\n";
       photosData.forEach(line => {
         const p = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
         const pid = p[0];
@@ -1069,13 +1085,114 @@ app.post("/api/admin/login", (req, res) => {
       res.attachment("vysledky_sutaze.csv");
       res.send(csv);
     } catch (e) {
+      console.error(e);
       res.status(500).send("Export failed");
+    }
+  });
+
+  app.get("/api/admin/export/total-archive", async (req, res) => {
+    try {
+      const archiverFunc = typeof archiver === 'function' ? archiver : (archiver as any).default;
+      const archive = archiverFunc("zip", { zlib: { level: 9 } });
+      res.attachment("speleofotografia_komplet_export.zip");
+      archive.pipe(res);
+
+      if (!fs.existsSync(REGISTRATIONS_CSV)) {
+         return res.status(404).send("No registrations found");
+      }
+
+      const photosRaw = fs.readFileSync(REGISTRATIONS_CSV, "utf8").trim().split("\n").slice(1);
+      const ratingsRaw = fs.existsSync(RATINGS_CSV) ? fs.readFileSync(RATINGS_CSV, "utf8").trim().split("\n").slice(1) : [];
+      const votesRaw = fs.existsSync(PUBLIC_VOTES_CSV) ? fs.readFileSync(PUBLIC_VOTES_CSV, "utf8").trim().split("\n").slice(1) : [];
+
+      // 1. Process Ratings
+      const juryScores: Record<string, number[]> = {};
+      const juryBreakdown: Record<string, Record<string, number>> = {};
+      ratingsRaw.forEach(r => {
+        const parts = r.split(",");
+        if (parts.length < 4) return;
+        const [pId, evalId, _, score] = parts;
+        if (!juryScores[pId]) juryScores[pId] = [];
+        juryScores[pId].push(parseInt(score));
+        if (!juryBreakdown[pId]) juryBreakdown[pId] = {};
+        juryBreakdown[pId][evalId] = parseInt(score);
+      });
+
+      // 2. Process Public Votes
+      const publicVotes: Record<string, number> = {};
+      votesRaw.forEach(v => {
+        const pid = v.split(",")[0];
+        publicVotes[pid] = (publicVotes[pid] || 0) + 1;
+      });
+
+      // 3. Generate Complete Results CSV
+      let resultsCsv = "\uFEFFID,Autor,Email,Instagram,Adresa,Kategória,Názov diela,Jazyk,Priemer poroty,Počet hlasov poroty,Verejné hlasy,Príbeh\n";
+      
+      // 4. Organize Photos into Folders
+      photosRaw.forEach(line => {
+        const p = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+        if (p.length < 11) return;
+        
+        const pid = p[0];
+        const author = p[1].replace(/"/g, '');
+        const email = p[2].replace(/"/g, '');
+        const address = p[5].replace(/"/g, '');
+        const category = p[8];
+        const title = p[9].replace(/"/g, '');
+        const originalFile = p[10];
+        const story = (p[12] || "").replace(/"/g, '""');
+
+        const scores = juryScores[pid] || [];
+        const avg = scores.length > 0 ? (scores.reduce((a,b)=>a+b,0)/scores.length).toFixed(2) : "0";
+
+        resultsCsv += `${pid},"${author}","${email}","${p[3]}","${address}",${category},"${title}",${p[7]},${avg},${scores.length},${publicVotes[pid]||0},"${story}"\n`;
+
+        // Add photo file to zip in category folder
+        const photoPath = path.join(UPLOADS_DIR, originalFile);
+        if (fs.existsSync(photoPath)) {
+          const safeTitle = removeDiacritics(title);
+          const safeAuthor = removeDiacritics(author);
+          const zipFileName = `fotografie/Kategoria_${category}/${category}_${safeAuthor}_${safeTitle}${path.extname(originalFile)}`;
+          archive.file(photoPath, { name: zipFileName });
+        }
+      });
+
+      archive.append(resultsCsv, { name: "vysledky_komplet.csv" });
+
+      // 5. Generate Detailed Jury Breakdown CSV
+      const evaluators = Array.from(new Set(ratingsRaw.map(r => r.split(",")[1])));
+      let juryCsv = "\uFEFFID fotky,Názov diela," + evaluators.join(",") + ",Priemer\n";
+      
+      photosRaw.forEach(line => {
+        const p = line.split(/,(?=(?:(?:[^"]*"){2})*[^()]*"$)/); // Using a simpler split for jury CSV if possible, but let's stick to the previous one
+        const p_split = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+        if (p_split.length < 10) return;
+        const pid = p_split[0];
+        const title = p_split[9].replace(/"/g, '');
+        const scores = juryScores[pid] || [];
+        const avg = scores.length > 0 ? (scores.reduce((a,b)=>a+b,0)/scores.length).toFixed(2) : "0";
+
+        let row = `${pid},"${title}"`;
+        evaluators.forEach(evId => {
+          row += `,${juryBreakdown[pid]?.[evId] || ""}`;
+        });
+        row += `,${avg}\n`;
+        juryCsv += row;
+      });
+      
+      archive.append(juryCsv, { name: "hlasovanie_podrobne.csv" });
+
+      archive.finalize();
+    } catch (e) {
+      console.error("Export error:", e);
+      if (!res.headersSent) res.status(500).send("Export failed");
     }
   });
 
   app.get("/api/admin/export/photos-zip", (req, res) => {
     try {
-      const archive = new ZipArchive({ zlib: { level: 9 } });
+      const archiverFunc = typeof archiver === 'function' ? archiver : (archiver as any).default;
+      const archive = archiverFunc("zip", { zlib: { level: 9 } });
       res.attachment("contest_photos.zip");
       archive.on("error", (err) => { throw err; });
       archive.pipe(res);
