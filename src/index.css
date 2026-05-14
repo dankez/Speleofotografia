@@ -1,0 +1,35 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+@theme {
+  --color-ink: #111111;
+  --color-paper: #FDFDFD;
+  --color-border: #E8E8E8;
+  --color-accent: #2D5A27;
+  --color-muted: #717171;
+  
+  --font-sans: "Helvetica Neue", Arial, sans-serif;
+}
+
+@layer base {
+  body {
+    @apply bg-paper text-ink selection:bg-ink selection:text-paper;
+  }
+}
+
+@layer utilities {
+  .animate-border-pulse {
+    animation: border-pulse 2.5s ease-in-out infinite;
+  }
+}
+
+@keyframes border-pulse {
+  0%, 100% {
+    border-color: rgba(45, 90, 39, 0.3);
+    box-shadow: 0 0 0px 0px rgba(45, 90, 39, 0);
+  }
+  50% {
+    border-color: rgba(45, 90, 39, 0.8);
+    box-shadow: 0 0 15px 0px rgba(45, 90, 39, 0.15);
+  }
+}

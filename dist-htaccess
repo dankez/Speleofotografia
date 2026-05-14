@@ -1,0 +1,10 @@
+RewriteEngine On
+RewriteBase /
+
+# 1. Forward all API requests to the PHP bridge
+RewriteRule ^api/(.*)$ api.php [L,QSA]
+
+# 2. React Router: Serve index.html for all non-file/non-dir routes
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule . index.html [L]
