@@ -28,6 +28,7 @@ export default function EvaluatorInterface({ evalId, lang }: Props) {
   const [loading, setLoading] = useState(false);
   const [evaluatorName, setEvaluatorName] = useState("");
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   useEffect(() => {
     fetchEvaluator();
@@ -82,7 +83,7 @@ export default function EvaluatorInterface({ evalId, lang }: Props) {
   const handleRate = async (score: number) => {
     if (!currentPhoto) return;
 
-    // Update local state
+    // Optimistic update local state immediately
     setRatings(prev => {
       const existing = prev.findIndex(r => r.photoId === currentPhoto.id);
       if (existing >= 0) {
@@ -93,27 +94,44 @@ export default function EvaluatorInterface({ evalId, lang }: Props) {
       return [...prev, { photoId: currentPhoto.id, score, judgeId: evalId }];
     });
 
-    // Save to server
-    await fetch("/api/rate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        evalId,
-        evalName: evaluatorName,
-        photoId: currentPhoto.id,
-        score
-      })
-    });
+    // Save to server with error handling
+    setSaveStatus("saving");
+    try {
+      const res = await fetch("/api/rate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          evalId,
+          evalName: evaluatorName,
+          photoId: currentPhoto.id,
+          score
+        })
+      });
 
-    // Auto next or finish category
-    if (currentIndex < photos.length - 1) {
-      setTimeout(() => setCurrentIndex(prev => prev + 1), 200);
-    } else {
-      // Last photo in category - return to selection
-      setTimeout(() => {
-        setSelectedCategory(null);
-        setCurrentIndex(0);
-      }, 500);
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        console.error("Rating save failed:", errData);
+        setSaveStatus("error");
+        // Revert local state on failure
+        setRatings(prev => prev.filter(r => r.photoId !== currentPhoto.id || r.score !== score));
+        return;
+      }
+
+      setSaveStatus("saved");
+      setTimeout(() => setSaveStatus("idle"), 1500);
+
+      // Auto next or finish category
+      if (currentIndex < photos.length - 1) {
+        setTimeout(() => setCurrentIndex(prev => prev + 1), 300);
+      } else {
+        setTimeout(() => {
+          setSelectedCategory(null);
+          setCurrentIndex(0);
+        }, 600);
+      }
+    } catch (e) {
+      console.error("Network error saving rating:", e);
+      setSaveStatus("error");
     }
   };
 
@@ -349,14 +367,23 @@ export default function EvaluatorInterface({ evalId, lang }: Props) {
           <div className="p-8 border border-border bg-paper space-y-4 text-center">
              <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted">{lang === "sk" ? "Stav hodnotenia" : "Rating Status"}</h4>
              <div className="flex flex-col items-center gap-2">
-                <div className={cn("w-14 h-14 flex items-center justify-center font-bold text-2xl border", currentRating > 0 ? "bg-accent text-white border-accent" : "bg-white text-muted border-border")}>
-                  {currentRating || "—"}
+                <div className={cn("w-14 h-14 flex items-center justify-center font-bold text-2xl border transition-all", currentRating > 0 ? "bg-accent text-white border-accent" : "bg-white text-muted border-border")}>
+                  {saveStatus === "saving" ? <Loader2 size={24} className="animate-spin" /> : (currentRating || "—")}
                 </div>
-                <p className="text-[10px] font-bold text-ink uppercase tracking-[1px] mt-2">
-                  {currentRating > 0 ? (lang === "sk" ? "BODOVANÉ" : "RATED") : (lang === "sk" ? "ČAKÁ NA BODY" : "WAITING")}
+                <p className={cn("text-[10px] font-bold uppercase tracking-[1px] mt-2 transition-colors",
+                  saveStatus === "error" ? "text-red-500" :
+                  saveStatus === "saved" ? "text-green-600" :
+                  saveStatus === "saving" ? "text-muted animate-pulse" :
+                  "text-ink"
+                )}>
+                  {saveStatus === "saving" ? (lang === "sk" ? "UKLADÁM..." : "SAVING...") :
+                   saveStatus === "saved" ? (lang === "sk" ? "✓ ULOŽENÉ" : "✓ SAVED") :
+                   saveStatus === "error" ? (lang === "sk" ? "✗ CHYBA UKLADANIA" : "✗ SAVE FAILED") :
+                   currentRating > 0 ? (lang === "sk" ? "BODOVANÉ" : "RATED") : (lang === "sk" ? "ČAKÁ NA BODY" : "WAITING")}
                 </p>
              </div>
           </div>
+
         </div>
       </div>
 

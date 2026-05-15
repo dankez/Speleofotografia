@@ -765,11 +765,15 @@ app.post("/api/admin/login", (req, res) => {
       
       const photoRatings: Record<string, number[]> = {};
       ratingsData.forEach(r => {
-        const parts = r.split(",");
+        if (!r.trim()) return;
+        // Format: evalId,"evalName",photoId,score,timestamp (evalName may be quoted)
+        const parts = r.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
         const pid = parts[2];
         const score = parseInt(parts[3]);
-        if (!photoRatings[pid]) photoRatings[pid] = [];
-        photoRatings[pid].push(score);
+        if (pid && !isNaN(score)) {
+          if (!photoRatings[pid]) photoRatings[pid] = [];
+          photoRatings[pid].push(score);
+        }
       });
 
       const photoVotes: Record<string, number> = {};
@@ -1654,6 +1658,14 @@ app.post("/api/admin/login", (req, res) => {
     const { evalId, evalName, photoId, score } = req.body;
     const timestamp = new Date().toISOString();
     
+    if (!evalId || !photoId || score === undefined) {
+      return res.status(400).json({ error: "Chýbajú povinné polia: evalId, photoId, score" });
+    }
+    const scoreNum = parseInt(score);
+    if (isNaN(scoreNum) || scoreNum < 1 || scoreNum > 10) {
+      return res.status(400).json({ error: "Hodnotenie musí byť číslo 1-10" });
+    }
+    
     try {
       let content = "";
       if (fs.existsSync(RATINGS_CSV)) {
@@ -1664,6 +1676,7 @@ app.post("/api/admin/login", (req, res) => {
       const header = lines[0] || "evalId,evalName,photoId,score,createdAt";
       
       // Filter out previous rating from this evaluator for this photo
+      // Use exact comma-split match to avoid false positives with startsWith
       const otherLines = lines.slice(1).filter(line => {
         if (!line.trim()) return false;
         const parts = line.split(",");
@@ -1671,10 +1684,13 @@ app.post("/api/admin/login", (req, res) => {
         return !(parts[0] === evalId && parts[2] === photoId);
       });
       
-      const newLine = `${evalId},${evalName},${photoId},${score},${timestamp}`;
+      // Quote evalName to safely handle commas in names
+      const safeName = `"${(evalName || "").replace(/"/g, '""')}"`;
+      const newLine = `${evalId},${safeName},${photoId},${scoreNum},${timestamp}`;
       const newContent = [header, ...otherLines, newLine].filter(l => l.trim()).join("\n") + "\n";
       
       fs.writeFileSync(RATINGS_CSV, newContent);
+      console.log(`RATE: evalId=${evalId} photoId=${photoId} score=${scoreNum}`);
       res.json({ success: true });
     } catch (e) {
       console.error("Error saving rating:", e);
@@ -1688,14 +1704,28 @@ app.post("/api/admin/login", (req, res) => {
       if (!fs.existsSync(RATINGS_CSV)) return res.json([]);
       const data = fs.readFileSync(RATINGS_CSV, "utf8");
       const lines = data.trim().split("\n").slice(1);
+      const evalId = req.params.evalId;
       const ratings = lines
-        .filter(l => l.startsWith(req.params.evalId))
+        // Exact match on first field (evalId) to avoid prefix collision
+        .filter(l => {
+          if (!l.trim()) return false;
+          const firstComma = l.indexOf(",");
+          return firstComma !== -1 && l.substring(0, firstComma) === evalId;
+        })
         .map(line => {
-          const parts = line.split(",");
-          return { photoId: parts[2], score: parseInt(parts[3]) };
-        });
+          // Format: evalId,"evalName",photoId,score,timestamp
+          // Use regex-safe CSV split for quoted fields
+          const parts = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+          return { 
+            photoId: parts[2] || "", 
+            score: parseInt(parts[3] || "0"),
+            judgeId: evalId
+          };
+        })
+        .filter(r => r.photoId && !isNaN(r.score));
       res.json(ratings);
     } catch (e) {
+      console.error("Error reading ratings:", e);
       res.json([]);
     }
   });

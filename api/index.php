@@ -23,8 +23,9 @@ define('REGISTRATIONS_CSV',  DATA_DIR . '/registrations.csv');
 define('RATINGS_CSV',        DATA_DIR . '/ratings.csv');
 define('PUBLIC_VOTES_CSV',   DATA_DIR . '/public_votes.csv');
 define('ADMINS_JSON',        DATA_DIR . '/admins.json');
+define('EVALUATORS_JSON',    DATA_DIR . '/evaluators.json');
 define('DEBUG_LOG',          __DIR__  . '/debug.txt');
-define('API_VERSION',        '3.3');
+define('API_VERSION',        '3.4');
 
 // === LOGGING ===
 function dlog($msg) {
@@ -149,11 +150,13 @@ if ($path === '/debug' && $method === 'GET') {
     echo "CAS SERVERA:        " . date('Y-m-d H:i:s') . " (" . date_default_timezone_get() . ")\n";
     echo "PHP VERZIA:         " . phpversion() . "\n";
     echo "GD KNIZNICA:        " . (extension_loaded('gd') ? 'DOSTUPNA' : 'CHYBA') . "\n";
+    echo "FREETYPE PODPORA:   " . (function_exists('imagettftext') ? 'ANO' : 'NIE') . "\n";
     echo "WEBP PODPORA:       " . (function_exists('imagewebp') ? 'ANO' : 'NIE') . "\n";
     echo "ZIP PODPORA:        " . (extension_loaded('zip') ? 'ANO' : 'NIE') . "\n";
     echo "UPLOADS ZAPISATELNY:" . (is_writable(UPLOADS_DIR) ? 'ANO' : 'NIE') . "\n";
     echo "ORIGINALS ZAPISAT:  " . (is_writable(ORIGINALS_DIR) ? 'ANO' : 'NIE') . "\n";
     echo "DATA DIR ZAPISAT:   " . (is_writable(DATA_DIR) ? 'ANO' : 'NIE') . "\n";
+    echo "SETTINGS.JSON ZAPIS: " . (file_exists(SETTINGS_JSON) && is_writable(SETTINGS_JSON) ? 'ANO' : (is_writable(DATA_DIR) ? 'ANO (new)' : 'NIE')) . "\n";
     echo "IMAGE PROCESSOR:    " . (file_exists(__DIR__.'/ImageProcessor.php') ? 'NAJDENY' : 'CHYBA') . "\n";
     echo "REGISTRATIONS.CSV:  " . count($photos) . " zaznamov\n";
     
@@ -339,6 +342,10 @@ if ($path === '/register' && $method === 'POST') {
     $rows   = [];
     $errors = [];
     $watermarkTpl = $s['watermarkTemplate'] ?? 'Speleofoto © $author';
+    $wFontSize    = $s['watermarkFontSize'] ?? 40;
+    $wColor       = $s['watermarkColor'] ?? 'rgba(255,255,255,0.5)';
+    
+    dlog("REGISTER: wTpl=$watermarkTpl, wSize=$wFontSize, wColor=$wColor");
 
     foreach ($fileList as $i => $file) {
         if ($file['error'] !== UPLOAD_ERR_OK) {
@@ -364,7 +371,7 @@ if ($path === '/register' && $method === 'POST') {
 
         dlog("FILE $i: kategoria=$category meno='$photoName' -> $webFile");
 
-        if (ImageProcessor::processDouble($file['tmp_name'], $origPath, $webPath, 1920, $watermark)) {
+        if (ImageProcessor::processDouble($file['tmp_name'], $origPath, $webPath, 1920, $watermark, $wFontSize, $wColor)) {
             dlog("FILE $i: OK");
             $esc = fn($v) => '"' . str_replace('"', '""', $v) . '"';
             $rows[] = implode(',', [
@@ -427,8 +434,16 @@ if ($path === '/admin/settings' && $method === 'POST') {
 if ($path === '/admin/photos' && $method === 'GET') { send_json(read_registrations()); }
 if ($path === '/admin/list'   && $method === 'GET') { 
     $admins = file_exists(ADMINS_JSON) ? json_decode(file_get_contents(ADMINS_JSON), true) : [];
+    $unique = [];
+    foreach ($admins as $a) {
+        // Exkludujeme porotcov (evaluators) zo zoznamu adminov
+        if (($a['role'] ?? '') === 'evaluator') continue;
+
+        $email = strtolower(trim($a['email'] ?? ''));
+        if ($email) $unique[$email] = $a;
+    }
     // Vrátime len potrebné údaje (bez hashov hesiel)
-    $list = array_map(fn($a) => ['email' => $a['email'], 'role' => $a['role'] ?? 'admin'], $admins);
+    $list = array_map(fn($a) => ['email' => $a['email'], 'role' => $a['role'] ?? 'admin'], array_values($unique));
     send_json($list); 
 }
 
@@ -457,17 +472,91 @@ if ($path === '/admin/dashboard-stats' && $method === 'GET') {
     $photos = read_registrations();
     $byCategory = [];
     foreach ($photos as $p) $byCategory[$p['category']] = ($byCategory[$p['category']] ?? 0) + 1;
+
+    // Štatistiky hodnotenia poroty
+    $ratedCount = 0;
+    $juryActivity = [];
+    if (file_exists(RATINGS_CSV)) {
+        $rlines = file(RATINGS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        array_shift($rlines);
+        $ratedPhotos = [];
+        foreach ($rlines as $rl) {
+            $r = str_getcsv($rl);
+            $pid = $r[0] ?? '';
+            $jname = trim($r[1] ?? '', '"');
+            $jid = $r[2] ?? '';
+            if ($pid) $ratedPhotos[$pid] = true;
+            if ($jid) $juryActivity[$jid] = ($juryActivity[$jid] ?? 0) + 1;
+        }
+        $ratedCount = count($ratedPhotos);
+    }
+
+    // Počet verejných hlasov
+    $publicVoteCount = 0;
+    if (file_exists(PUBLIC_VOTES_CSV)) {
+        $vlines = file(PUBLIC_VOTES_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        $publicVoteCount = max(0, count($vlines) - 1);
+    }
+
     send_json([
-        'total'         => count($photos),
-        'byCategory'    => $byCategory,
-        'uniqueAuthors' => count(array_unique(array_column($photos, 'email'))),
+        'total'          => count($photos),
+        'byCategory'     => $byCategory,
+        'uniqueAuthors'  => count(array_unique(array_column($photos, 'email'))),
+        'ratedPhotos'    => $ratedCount,
+        'publicVotes'    => $publicVoteCount,
+        'juryActivity'   => $juryActivity,
     ]);
 }
 
+// Helper: read evaluators from dedicated evaluators.json
+function read_evaluators() {
+    if (!file_exists(EVALUATORS_JSON)) return [];
+    $data = json_decode(file_get_contents(EVALUATORS_JSON), true);
+    return is_array($data) ? $data : [];
+}
+
 if ($path === '/evaluators' && $method === 'GET') {
-    $admins = file_exists(ADMINS_JSON) ? json_decode(file_get_contents(ADMINS_JSON), true) : [];
-    $evaluators = array_values(array_filter($admins, fn($a) => ($a['role'] ?? '') === 'evaluator'));
-    send_json(array_map(fn($e) => ['id' => $e['id'] ?? $e['email'], 'name' => $e['name'] ?? $e['email']], $evaluators));
+    $evals = read_evaluators();
+    // Pridáme počet hodnotení pre každého porotcu
+    $counts = [];
+    if (file_exists(RATINGS_CSV)) {
+        $rlines = file(RATINGS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        array_shift($rlines);
+        foreach ($rlines as $rl) {
+            $r = str_getcsv($rl);
+            $jid = $r[2] ?? '';
+            if ($jid) $counts[$jid] = ($counts[$jid] ?? 0) + 1;
+        }
+    }
+    $result = array_map(fn($e) => [
+        'id'         => $e['id'],
+        'name'       => $e['name'],
+        'ratedCount' => $counts[$e['id']] ?? 0,
+    ], $evals);
+    send_json($result);
+}
+
+if ($path === '/evaluators' && $method === 'POST') {
+    $data = json_input();
+    $name = trim($data['name'] ?? '');
+    if (empty($name)) send_json(['error' => 'Meno porotcu je povinné'], 400);
+
+    $evals = read_evaluators();
+    $id = bin2hex(random_bytes(8));
+    $evals[] = ['id' => $id, 'name' => $name, 'createdAt' => date('c')];
+
+    file_put_contents(EVALUATORS_JSON, json_encode($evals, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+    dlog("EVALUATOR CREATE: id=$id name=$name");
+    send_json(['status' => 'ok', 'id' => $id, 'name' => $name]);
+}
+
+if (preg_match('#^/evaluators/([^/]+)$#', $path, $m) && $method === 'DELETE') {
+    $delId = $m[1];
+    $evals = read_evaluators();
+    $evals = array_values(array_filter($evals, fn($e) => $e['id'] !== $delId));
+    file_put_contents(EVALUATORS_JSON, json_encode($evals, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+    dlog("EVALUATOR DELETE: id=$delId");
+    send_json(['success' => true]);
 }
 
 if ($path === '/admin/public-results' && $method === 'GET') {
@@ -484,6 +573,92 @@ if ($path === '/admin/public-results' && $method === 'GET') {
     foreach ($photos as &$p) $p['voteCount'] = $votes[$p['id']] ?? 0;
     usort($photos, fn($a, $b) => $b['voteCount'] - $a['voteCount']);
     send_json($photos);
+}
+
+// ============================================================
+// === JURY: FOTOGRAFIE PRE POROTCU (anonymizované)
+// ============================================================
+if ($path === '/jury/photos' && $method === 'GET') {
+    $category = $_GET['category'] ?? '';
+    $all = read_registrations();
+    
+    $juryPhotos = [];
+    foreach ($all as $p) {
+        if ($category && $p['category'] !== $category) continue;
+        if (empty($p['webPath'])) continue;
+        
+        $juryPhotos[] = [
+            'id'          => $p['id'],
+            'category'    => $p['category'],
+            'name'        => $p['name'],
+            'webPath'     => $p['webPath'],
+            'description' => $p['description'],
+            'metadata'    => $p['metadata']
+        ];
+    }
+    send_json($juryPhotos);
+}
+
+// ============================================================
+// === JURY: MOJE HODNOTENIA
+// ============================================================
+if (preg_match('#^/ratings/([^/]+)$#', $path, $m) && $method === 'GET') {
+    $evalId = $m[1];
+    $ratings = [];
+    if (file_exists(RATINGS_CSV)) {
+        $lines = file(RATINGS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        array_shift($lines); // header
+        foreach ($lines as $line) {
+            $r = str_getcsv($line);
+            if (($r[2] ?? '') === $evalId) {
+                $ratings[] = [
+                    'photoId' => $r[0] ?? '',
+                    'score'   => (int)($r[3] ?? 0),
+                    'judgeId' => $r[2] ?? ''
+                ];
+            }
+        }
+    }
+    send_json($ratings);
+}
+
+// ============================================================
+// === JURY: BODOVANIE
+// ============================================================
+if ($path === '/rate' && $method === 'POST') {
+    $data = json_input();
+    $photoId = $data['photoId'] ?? '';
+    $evalId  = $data['evalId'] ?? '';
+    $evalName = $data['evalName'] ?? '';
+    $score    = (int)($data['score'] ?? 0);
+
+    if (!$photoId || !$evalId || $score < 1 || $score > 10) {
+        send_json(['error' => 'Neplatné údaje pre hodnotenie'], 400);
+    }
+
+    ensure_csv(RATINGS_CSV, 'photoId,judgeName,judgeId,score,timestamp');
+    
+    $lines = file(RATINGS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    $header = array_shift($lines);
+    $newLines = [$header];
+    foreach ($lines as $line) {
+        $r = str_getcsv($line);
+        if (($r[0] ?? '') === $photoId && ($r[2] ?? '') === $evalId) {
+            continue;
+        }
+        $newLines[] = $line;
+    }
+    
+    $newLines[] = implode(',', [
+        $photoId,
+        '"' . str_replace('"', '""', $evalName) . '"',
+        $evalId,
+        $score,
+        date('c')
+    ]);
+    
+    file_put_contents(RATINGS_CSV, implode("\n", $newLines) . "\n", LOCK_EX);
+    send_json(['success' => true]);
 }
 
 if (in_array($path, ['/admin/bulk-upload', '/admin/stress-upload']) && $method === 'POST') {
@@ -676,10 +851,120 @@ if ($path === '/admin/export/results-csv' && $method === 'GET') {
     if (!file_exists(REGISTRATIONS_CSV)) {
         send_json(['error' => 'Súbor s registráciami neexistuje'], 404);
     }
+    
+    // Načítaj fotky
+    $photos = read_registrations();
+    
+    // Načítaj verejné hlasy
+    $publicVotes = [];
+    if (file_exists(PUBLIC_VOTES_CSV)) {
+        $vlines = file(PUBLIC_VOTES_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        array_shift($vlines);
+        foreach ($vlines as $v) {
+            $r = str_getcsv($v);
+            $pid = $r[0] ?? '';
+            if ($pid) $publicVotes[$pid] = ($publicVotes[$pid] ?? 0) + 1;
+        }
+    }
+    
+    // Načítaj porotcov a hodnotenia
+    $evaluators = read_evaluators(); // vracia pole porotcov
+    
+    $juryScores = [];
+    if (file_exists(RATINGS_CSV)) {
+        $rlines = file(RATINGS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        array_shift($rlines);
+        foreach ($rlines as $rl) {
+            $r = str_getcsv($rl);
+            $pid = $r[0] ?? '';
+            $jid = $r[2] ?? '';
+            $score = (int)($r[3] ?? 0);
+            if ($pid && $jid) {
+                if (!isset($juryScores[$pid])) $juryScores[$pid] = [];
+                $juryScores[$pid][$jid] = $score;
+            }
+        }
+    }
+    
     dlog("EXPORT: results-csv");
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="speleofotografia_vysledky_' . date('Y-m-d') . '.csv"');
-    readfile(REGISTRATIONS_CSV);
+    echo "\xEF\xBB\xBF"; // UTF-8 BOM pre Excel
+    
+    // CSV Header
+    $headerCols = ['ID', 'Kategória', 'Názov', 'Autor', 'Email', 'Krajina', 'Rok', 'Hlasy_Verejnosti', 'Porota_Spolu'];
+    foreach ($evaluators as $e) {
+        $headerCols[] = 'Porotca_' . str_replace(' ', '_', $e['name']);
+    }
+    
+    $esc = fn($v) => '"' . str_replace('"', '""', $v) . '"';
+    echo implode(',', $headerCols) . "\n";
+    
+    foreach ($photos as $p) {
+        $pid = $p['id'];
+        $pvotes = $publicVotes[$pid] ?? 0;
+        
+        $jScores = $juryScores[$pid] ?? [];
+        $jTotal = array_sum($jScores);
+        
+        $row = [
+            $pid,
+            $p['category'],
+            $p['name'],
+            $p['author'],
+            $p['email'],
+            $p['country'] ?? '',
+            $p['year'] ?? '',
+            $pvotes,
+            $jTotal
+        ];
+        
+        foreach ($evaluators as $e) {
+            $row[] = $jScores[$e['id']] ?? '';
+        }
+        
+        echo implode(',', array_map($esc, $row)) . "\n";
+    }
+    exit;
+}
+
+// ============================================================
+// === ADMIN: EXPORT PUBLIC VOTES CSV
+// ============================================================
+if ($path === '/admin/export/public-votes-csv' && $method === 'GET') {
+    if (!file_exists(PUBLIC_VOTES_CSV)) {
+        send_json(['error' => 'Žiadne hlasy verejnosti ešte neboli zaznamenané'], 404);
+    }
+    dlog("EXPORT: public-votes-csv");
+
+    // Obohatíme o názov fotky a kategóriu
+    $photos = [];
+    foreach (read_registrations() as $p) {
+        $photos[$p['id']] = ['name' => $p['name'], 'category' => $p['category'], 'author' => $p['author']];
+    }
+
+    $lines = file(PUBLIC_VOTES_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    $header = array_shift($lines);
+
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="speleofotografia_hlasy_verejnosti_' . date('Y-m-d') . '.csv"');
+    echo "\xEF\xBB\xBF"; // UTF-8 BOM pre Excel
+
+    echo "photoId,photoName,photoCategory,photoAuthor,createdAt,voterIdAnon\n";
+    foreach ($lines as $line) {
+        $r = str_getcsv($line);
+        $pid = $r[0] ?? '';
+        $info = $photos[$pid] ?? ['name' => '', 'category' => '', 'author' => ''];
+        $esc = fn($v) => '"' . str_replace('"', '""', $v) . '"';
+        echo implode(',', [
+            $esc($pid),
+            $esc($info['name']),
+            $esc($info['category']),
+            $esc($info['author']),
+            $esc($r[1] ?? ''),
+            $esc(substr(md5($r[2] ?? ''), 0, 8)) // anonymizovaný voter ID
+        ]) . "\n";
+    }
     exit;
 }
 
@@ -690,6 +975,11 @@ if ($path === '/admin/export/total-archive' && $method === 'GET') {
     if (!extension_loaded('zip')) {
         send_json(['error' => 'ZIP rozšírenie nie je na serveri dostupné'], 500);
     }
+    
+    // Zvýšenie limitov pre veľké archívy
+    set_time_limit(600); // 10 minút
+    ini_set('memory_limit', '1024M');
+    ignore_user_abort(true);
     
     $zipFile = DATA_DIR . '/speleofoto_archive_' . date('Ymd_His') . '.zip';
     $zip = new ZipArchive();
@@ -706,7 +996,6 @@ if ($path === '/admin/export/total-archive' && $method === 'GET') {
         if ($file) {
             $filePath = ORIGINALS_DIR . '/' . $file;
             if (file_exists($filePath)) {
-                // Do ZIP pridáme súbor s menom, ktoré je v CSV (bezpečný názov)
                 $zip->addFile($filePath, $file);
                 $addedCount++;
             }
@@ -720,16 +1009,110 @@ if ($path === '/admin/export/total-archive' && $method === 'GET') {
         send_json(['error' => 'Žiadne fotografie na archiváciu'], 404);
     }
     
-    dlog("EXPORT: total-archive count=$addedCount");
+    dlog("EXPORT: total-archive count=$addedCount size=" . filesize($zipFile));
+    
+    // Vyčistiť buffery pred odoslaním veľkého súboru
+    while (ob_get_level()) ob_end_clean();
     
     header('Content-Type: application/zip');
     header('Content-Disposition: attachment; filename="speleofotografia_komplet_' . date('Y-m-d') . '.zip"');
     header('Content-Length: ' . filesize($zipFile));
     header('Pragma: no-cache');
+    header('Cache-Control: must-revalidate, post-check=0, pre-check=0');
     header('Expires: 0');
     
-    readfile($zipFile);
+    // Streamovanie súboru
+    $handle = fopen($zipFile, 'rb');
+    if ($handle) {
+        while (!feof($handle)) {
+            echo fread($handle, 1024 * 1024); // 1MB chunks
+            flush();
+        }
+        fclose($handle);
+    }
+    
     unlink($zipFile); // Vymazať po odoslaní
+    exit;
+}
+
+// ============================================================
+// === ADMIN: VŠETKY HODNOTENIA (pre dashboard)
+// ============================================================
+if ($path === '/admin/ratings' && $method === 'GET') {
+    $result = [];
+    if (file_exists(RATINGS_CSV)) {
+        $lines = file(RATINGS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        array_shift($lines); // header
+
+        $grouped = [];
+        foreach ($lines as $line) {
+            $r = str_getcsv($line);
+            $photoId   = $r[0] ?? '';
+            $judgeName = $r[1] ?? '';
+            $judgeId   = $r[2] ?? '';
+            $score     = (int)($r[3] ?? 0);
+            $ts        = $r[4] ?? '';
+            if (!$photoId) continue;
+            if (!isset($grouped[$photoId])) {
+                $grouped[$photoId] = ['photoId' => $photoId, 'scores' => [], 'judges' => []];
+            }
+            $grouped[$photoId]['scores'][]  = $score;
+            $grouped[$photoId]['judges'][]  = ['judgeId' => $judgeId, 'judgeName' => $judgeName, 'score' => $score, 'timestamp' => $ts];
+        }
+
+        foreach ($grouped as $pid => $g) {
+            $scores = $g['scores'];
+            $avg = count($scores) > 0 ? round(array_sum($scores) / count($scores), 2) : 0;
+            $result[] = [
+                'photoId'      => $pid,
+                'averageScore' => $avg,
+                'scoreCount'   => count($scores),
+                'judges'       => $g['judges'],
+            ];
+        }
+    }
+    dlog("ADMIN RATINGS: returned " . count($result) . " items");
+    send_json($result);
+}
+
+// ============================================================
+// === ADMIN: EXPORT HODNOTENÍ DO CSV
+// ============================================================
+if ($path === '/admin/export/ratings-csv' && $method === 'GET') {
+    if (!file_exists(RATINGS_CSV)) {
+        send_json(['error' => 'Žiadne hodnotenia ešte neboli zaznamenané'], 404);
+    }
+    dlog("EXPORT: ratings-csv");
+
+    $photos = [];
+    foreach (read_registrations() as $p) {
+        $photos[$p['id']] = ['name' => $p['name'], 'category' => $p['category'], 'author' => $p['author']];
+    }
+
+    $lines = file(RATINGS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    $header = array_shift($lines);
+
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="speleofotografia_hodnotenia_' . date('Y-m-d') . '.csv"');
+    echo "\xEF\xBB\xBF"; // UTF-8 BOM pre Excel
+
+    echo "photoId,photoName,photoCategory,photoAuthor,judgeName,judgeId,score,timestamp\n";
+    foreach ($lines as $line) {
+        $r = str_getcsv($line);
+        $pid  = $r[0] ?? '';
+        $info = $photos[$pid] ?? ['name' => '', 'category' => '', 'author' => ''];
+        $esc = fn($v) => '"' . str_replace('"', '""', $v) . '"';
+        echo implode(',', [
+            $esc($pid),
+            $esc($info['name']),
+            $esc($info['category']),
+            $esc($info['author']),
+            $esc($r[1] ?? ''),
+            $esc($r[2] ?? ''),
+            (int)($r[3] ?? 0),
+            $esc($r[4] ?? ''),
+        ]) . "\n";
+    }
     exit;
 }
 

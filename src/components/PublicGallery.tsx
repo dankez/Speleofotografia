@@ -10,6 +10,7 @@ interface PublicPhoto {
   name: string;
   webPath: string;
   description: string;
+  voteCount?: number;
 }
 
 export default function PublicGallery({ lang }: { lang: Lang }) {
@@ -85,17 +86,32 @@ export default function PublicGallery({ lang }: { lang: Lang }) {
     e.stopPropagation();
     if (votedIds.includes(photoId)) return;
 
+    // Anonymný fingerprint zo localStorage – persistent medzi reloadmi
+    let fingerprint = localStorage.getItem("speleo_fp");
+    if (!fingerprint) {
+      fingerprint = crypto.randomUUID();
+      localStorage.setItem("speleo_fp", fingerprint);
+    }
+
     try {
       const res = await fetch("/api/public/vote", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ photoId })
+        body: JSON.stringify({ photoId, fingerprint })
       });
       
       if (res.ok) {
         const newVoted = [...votedIds, photoId];
         setVotedIds(newVoted);
         localStorage.setItem("speleo_voted_ids", JSON.stringify(newVoted));
+        // Aktualizácia počtu hlasov v lokálnom state (bez reloadu)
+        setPhotos(prev => prev.map(p => 
+          p.id === photoId ? { ...p, voteCount: (p.voteCount || 0) + 1 } : p
+        ));
+      } else if (res.status === 429) {
+        // Duplikát - pridáme do lokálneho zoznamu aj tak
+        setVotedIds(prev => [...prev, photoId]);
+        localStorage.setItem("speleo_voted_ids", JSON.stringify([...votedIds, photoId]));
       }
     } catch (e) {
       console.error(e);

@@ -87,6 +87,8 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
     },
     maxPhotosPerCategory: "5",
     watermarkTemplate: "$author",
+    watermarkFontSize: 40,
+    watermarkColor: "rgba(255,255,255,0.4)",
     logoUrl: "",
     smtpHost: "",
     smtpPort: "587",
@@ -146,7 +148,7 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
     }
   };
   const [adminList, setAdminList] = useState<any[]>([]);
-  const [publicResults, setPublicResults] = useState<Record<string, number>>({});
+  const [publicResults, setPublicResults] = useState<Array<{id: string; name: string; author: string; category: string; webPath: string; voteCount: number}>>([]);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteStatus, setInviteStatus] = useState<"idle" | "sending" | "success" | "error">("idle");
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
@@ -210,7 +212,10 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
   const fetchPublicResults = async () => {
     try {
       const res = await fetch("/api/admin/public-results");
-      if (res.ok) setPublicResults(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        setPublicResults(Array.isArray(data) ? data : []);
+      }
     } catch (e) {
       console.error(e);
     }
@@ -446,26 +451,45 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
     window.location.href = "/api/admin/export/results-csv";
   };
 
+  const exportPublicVotes = () => {
+    window.location.href = "/api/admin/export/public-votes-csv";
+  };
+
+  const exportRatings = () => {
+    window.location.href = "/api/admin/export/ratings-csv";
+  };
+
   const downloadTotalArchive = () => {
     window.location.href = "/api/admin/export/total-archive";
   };
 
   const fetchData = async () => {
     try {
-      const [statsRes, photosRes, evalsRes, dashStatsRes] = await Promise.all([
+      const [statsRes, photosRes, evalsRes, dashStatsRes, ratingsRes] = await Promise.all([
         fetch("/api/stats"),
         fetch("/api/admin/photos"),
         fetch("/api/evaluators"),
-        fetch("/api/admin/dashboard-stats")
+        fetch("/api/admin/dashboard-stats"),
+        fetch("/api/admin/ratings"),
       ]);
       
       const statsData = await (statsRes.ok ? statsRes.json() : Promise.resolve({}));
       const photosData = await (photosRes.ok ? photosRes.json() : Promise.resolve([]));
       const evalsData = await (evalsRes.ok ? evalsRes.json() : Promise.resolve([]));
       const dashStatsData = await (dashStatsRes.ok ? dashStatsRes.json() : Promise.resolve({}));
+      const ratingsData: {photoId: string; averageScore: number; scoreCount: number}[] = await (ratingsRes.ok ? ratingsRes.json() : Promise.resolve([]));
+
+      // Pripiš averageScore a scoreCount každej fotke
+      const ratingsMap: Record<string, {averageScore: number; scoreCount: number}> = {};
+      if (Array.isArray(ratingsData)) {
+        ratingsData.forEach(r => { ratingsMap[r.photoId] = { averageScore: r.averageScore, scoreCount: r.scoreCount }; });
+      }
+      const photosWithScores = Array.isArray(photosData)
+        ? photosData.map((p: any) => ({ ...p, ...(ratingsMap[p.id] || { averageScore: 0, scoreCount: 0 }) }))
+        : [];
 
       setStats(statsData);
-      setPhotos(Array.isArray(photosData) ? photosData : []);
+      setPhotos(photosWithScores);
       setEvaluators(evalsData);
       setDashboardStats(dashStatsData);
     } catch (e) {
@@ -1001,8 +1025,8 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                     <label className="text-[10px] font-bold uppercase text-muted">Watermark Font Size (px)</label>
                     <input 
                       type="number" 
-                      value={settings.watermarkFontSize || 24}
-                      onChange={e => setSettings({ ...settings, watermarkFontSize: parseInt(e.target.value) || 24 })}
+                      value={settings.watermarkFontSize || 40}
+                      onChange={e => setSettings({ ...settings, watermarkFontSize: e.target.value ? parseInt(e.target.value) : 40 })}
                       className="w-full p-3 border border-border bg-white text-sm outline-none focus:border-ink"
                     />
                   </div>
@@ -1316,32 +1340,27 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                   {lang === "sk" ? "Cena verejnosti - Priebežný rebríček" : "Public Choice - Current Standings"}
                 </h3>
                 <span className="text-[10px] font-bold text-muted uppercase tracking-widest">
-                  {(Object.values(publicResults) as number[]).reduce((a: number, b: number) => a + b, 0)} {lang === "sk" ? "hlasov celkom" : "total votes"}
+                  {publicResults.reduce((a, p) => a + (p.voteCount || 0), 0)} {lang === "sk" ? "hlasov celkom" : "total votes"}
                 </span>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                 {Object.entries(publicResults)
-                   .sort(([, a], [, b]) => (b as number) - (a as number))
+                 {publicResults
                    .slice(0, 6)
-                   .map(([id, count]) => {
-                     const photo = photos.find(p => p.id === id);
-                     if (!photo) return null;
-                     return (
-                       <div key={id} className="flex items-center gap-4 p-3 border border-border bg-white group hover:border-accent transition-colors">
-                         <div className="w-12 h-12 bg-muted shrink-0 overflow-hidden">
-                           <img src={`/uploads/${photo.webPath || photo.path}`} className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all" alt="" />
-                         </div>
-                         <div className="flex-1 min-w-0">
-                           <p className="text-[10px] font-bold truncate tracking-tight">{photo.name}</p>
-                           <p className="text-[9px] text-muted uppercase font-bold truncate leading-tight">{photo.author}</p>
-                         </div>
-                         <div className="text-right">
-                           <p className="text-xl font-light text-accent leading-none">{count}</p>
-                           <p className="text-[8px] text-muted font-bold uppercase leading-none mt-1">{lang === "sk" ? "hlasov" : "votes"}</p>
-                         </div>
+                   .map((photo) => (
+                     <div key={photo.id} className="flex items-center gap-4 p-3 border border-border bg-white group hover:border-accent transition-colors">
+                       <div className="w-12 h-12 bg-muted shrink-0 overflow-hidden">
+                         <img src={`/uploads/${photo.webPath}`} className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all" alt="" />
                        </div>
-                     );
-                   })}
+                       <div className="flex-1 min-w-0">
+                         <p className="text-[10px] font-bold truncate tracking-tight">{photo.name}</p>
+                         <p className="text-[9px] text-muted uppercase font-bold truncate leading-tight">{photo.author}</p>
+                       </div>
+                       <div className="text-right">
+                         <p className="text-xl font-light text-accent leading-none">{photo.voteCount}</p>
+                         <p className="text-[8px] text-muted font-bold uppercase leading-none mt-1">{lang === "sk" ? "hlasov" : "votes"}</p>
+                       </div>
+                     </div>
+                   ))}
               </div>
             </div>
 
@@ -1359,6 +1378,38 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                 >
                   <Download size={16} />
                   Download CSV
+                </button>
+              </div>
+
+              <div className="flex flex-col md:flex-row gap-6 p-8 bg-paper border border-accent/30 items-center justify-between rounded-sm">
+                <div className="space-y-2 text-center md:text-left">
+                  <h4 className="text-sm font-bold uppercase tracking-[3px] text-accent">Hlasy verejnosti (.CSV)</h4>
+                  <p className="text-[11px] text-muted max-w-md">
+                    Surové dáta verejného hlasovania – každý hlas na samostatnom riadku s časovou pečiatkou a anonymným ID hlasujúceho.
+                  </p>
+                </div>
+                <button 
+                  onClick={exportPublicVotes}
+                  className="flex items-center gap-3 px-10 py-4 bg-accent text-white text-[11px] font-bold uppercase tracking-widest hover:opacity-90 transition-opacity"
+                >
+                  <Download size={16} />
+                  Download Public Votes
+                </button>
+              </div>
+
+              <div className="flex flex-col md:flex-row gap-6 p-8 bg-paper border border-border items-center justify-between rounded-sm">
+                <div className="space-y-2 text-center md:text-left">
+                  <h4 className="text-sm font-bold uppercase tracking-[3px] text-ink">Hodnotenia poroty (.CSV)</h4>
+                  <p className="text-[11px] text-muted max-w-md">
+                    Kompletné hodnotenia od všetkých porotcov – každé bodovanie na samostatnom riadku s menom porotcu a časovou pečiatkou.
+                  </p>
+                </div>
+                <button 
+                  onClick={exportRatings}
+                  className="flex items-center gap-3 px-10 py-4 bg-white border border-border text-ink text-[11px] font-bold uppercase tracking-widest hover:bg-paper transition-colors"
+                >
+                  <Download size={16} />
+                  Download Ratings CSV
                 </button>
               </div>
 

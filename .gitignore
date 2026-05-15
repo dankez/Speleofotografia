@@ -8,17 +8,31 @@ coverage/
 .env*
 !.env.example
 
-# Keep directories but exclude contents
-data/*
+# Exclude all data and uploads (keep folder structure via .gitkeep)
+data/*.json
+data/*.csv
+data/*.sql
 !data/.gitkeep
-uploads/*
+uploads/**/*
 !uploads/.gitkeep
-uploads/originals/*
 !uploads/originals/.gitkeep
 
+# Exclude all media files
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.svg
+*.webp
+*.mp4
+*.zip
+
+# Agent & System files
 graphify-out/
 .gemini/
 demo/
 scratch/
 venv/
-
+.env
+.env.production
+.env.local
