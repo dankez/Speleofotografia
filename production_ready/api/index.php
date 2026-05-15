@@ -917,7 +917,7 @@ if ($path === '/admin/photos/bulk-delete' && $method === 'POST') {
 }
 
 // ============================================================
-// === ADMIN: EXPORT DO CSV
+// === ADMIN: EXPORT DO CSV (Kompletné výsledky poroty)
 // ============================================================
 if ($path === '/admin/export/results-csv' && $method === 'GET') {
     if (!file_exists(REGISTRATIONS_CSV)) {
@@ -958,16 +958,17 @@ if ($path === '/admin/export/results-csv' && $method === 'GET') {
     
     dlog("EXPORT: results-csv");
     header('Content-Type: text/csv; charset=utf-8');
-    header('Content-Disposition: attachment; filename="speleofotografia_vysledky_' . date('Y-m-d') . '.csv"');
+    header('Content-Disposition: attachment; filename="speleofotografia_vysledky_porota_' . date('Y-m-d') . '.csv"');
     
     $out = fopen('php://output', 'w');
     fprintf($out, chr(0xEF).chr(0xBB).chr(0xBF)); // UTF-8 BOM
     
-    // CSV Header
-    $headerCols = ['ID', 'Kategória', 'Názov', 'Autor', 'Email', 'Adresa', 'Rok', 'Hlasy_Verejnosti', 'Porota_Spolu'];
+    // CSV Header: Info -> Porotcovia -> Skóre na konci
+    $headerCols = ['ID', 'Kategória', 'Názov', 'Autor', 'Email', 'Adresa', 'Rok', 'Hlasy_Verejnosti'];
     foreach ($evaluators as $e) {
         $headerCols[] = 'Porotca_' . $e['name'];
     }
+    $headerCols[] = 'Porota_Spolu'; // Posledný stĺpec
     fputcsv($out, $headerCols);
     
     foreach ($photos as $p) {
@@ -984,14 +985,60 @@ if ($path === '/admin/export/results-csv' && $method === 'GET') {
             $p['email'],
             $p['address'],
             $contestYear,
-            $pvotes,
-            $jTotal
+            $pvotes
         ];
         
         foreach ($evaluators as $e) {
             $row[] = $jScores[$e['id']] ?? '';
         }
+        $row[] = $jTotal; // Skóre na konci
         fputcsv($out, $row);
+    }
+    fclose($out);
+    exit;
+}
+
+// ============================================================
+// === ADMIN: EXPORT PUBLIC RESULTS SUMMARY (Cena verejnosti)
+// ============================================================
+if ($path === '/admin/export/public-results-csv' && $method === 'GET') {
+    if (!file_exists(REGISTRATIONS_CSV)) {
+        send_json(['error' => 'Súbor s registráciami neexistuje'], 404);
+    }
+    
+    $s = read_settings();
+    $photos = read_registrations();
+    $contestYear = $s['contestYear'] ?? date('Y');
+    
+    $votes = [];
+    $vrows = read_csv_locked(PUBLIC_VOTES_CSV);
+    if (!empty($vrows)) {
+        array_shift($vrows);
+        foreach ($vrows as $v) {
+            if (!empty($v[0])) $votes[$v[0]] = ($votes[$v[0]] ?? 0) + 1;
+        }
+    }
+
+    dlog("EXPORT: public-results-csv");
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="speleofotografia_vysledky_verejnost_' . date('Y-m-d') . '.csv"');
+    
+    $out = fopen('php://output', 'w');
+    fprintf($out, chr(0xEF).chr(0xBB).chr(0xBF)); // UTF-8 BOM
+    
+    fputcsv($out, ['ID', 'Kategória', 'Názov', 'Autor', 'Email', 'Adresa', 'Rok', 'Pocet_Hlasov']);
+    
+    foreach ($photos as $p) {
+        fputcsv($out, [
+            $p['id'],
+            $p['category'],
+            $p['name'],
+            $p['author'],
+            $p['email'],
+            $p['address'],
+            $contestYear,
+            $votes[$p['id']] ?? 0
+        ]);
     }
     fclose($out);
     exit;
