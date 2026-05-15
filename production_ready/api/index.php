@@ -234,10 +234,14 @@ if ($path === '/stats' && $method === 'GET') {
     $photos = read_registrations();
     $votes = [];
     $vrows = read_csv_locked(PUBLIC_VOTES_CSV);
+    $totalVotes = 0;
     if (!empty($vrows)) {
         array_shift($vrows);
         foreach ($vrows as $v) {
-            if (!empty($v[0])) $votes[$v[0]] = ($votes[$v[0]] ?? 0) + 1;
+            if (!empty($v[0])) {
+                $votes[$v[0]] = ($votes[$v[0]] ?? 0) + 1;
+                $totalVotes++;
+            }
         }
     }
     
@@ -254,6 +258,7 @@ if ($path === '/stats' && $method === 'GET') {
     
     send_json([
         'total' => count($photos),
+        'totalVotes' => $totalVotes,
         'uniqueEmails' => count(array_unique(array_column($photos, 'email'))),
         'top3' => array_slice($ranked, 0, 3)
     ]);
@@ -555,12 +560,13 @@ if ($path === '/admin/dashboard-stats' && $method === 'GET') {
     }
 
     send_json([
-        'total'          => count($photos),
-        'byCategory'     => $byCategory,
-        'uniqueAuthors'  => count(array_unique(array_column($photos, 'email'))),
-        'ratedPhotos'    => $ratedCount,
-        'publicVotes'    => $publicVoteCount,
-        'juryActivity'   => $juryActivity,
+        'totalPhotos'      => count($photos),
+        'byCategory'       => $byCategory,
+        'uniqueAuthors'    => count(array_unique(array_column($photos, 'email'))),
+        'ratedPhotos'      => $ratedCount,
+        'totalPublicVotes' => $publicVoteCount,
+        'juryActivity'     => $juryActivity,
+        'dailyAccess'      => 0, // Zatiaľ nesledované, ale vyžadované frontendom
     ]);
 }
 
