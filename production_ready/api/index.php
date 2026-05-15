@@ -794,6 +794,43 @@ if ($path === '/admin/system-reset' && $method === 'POST') {
     send_json(['success' => true, 'message' => 'Systém bol kompletne vyčistený (DB aj FS)']);
 }
 
+if (preg_match('#^/admin/photos/([^/]+)$#', $path, $m) && $method === 'PATCH') {
+    $idToUpdate = $m[1];
+    $updates = json_input();
+    dlog("UPDATE PHOTO: id=$idToUpdate");
+
+    $rows = read_csv_locked(REGISTRATIONS_CSV);
+    if (empty($rows)) send_json(['error' => 'Žiadne registrácie'], 404);
+
+    $header = array_shift($rows);
+    $found = false;
+    $newRows = [$header];
+
+    foreach ($rows as $p) {
+        if (($p[0] ?? '') === $idToUpdate) {
+            $found = true;
+            // Mapovanie polí CSV (pozri csv_row_to_photo):
+            // 0:id, 1:author, 2:email, 3:instagram, 4:webpage, 5:address, 6:gdpr, 7:rules, 
+            // 8:category, 9:name, 10:origPath, 11:webPath, 12:desc, 13:meta, 14:createdAt, 15:shortlisted
+            
+            if (isset($updates['author']))      $p[1]  = $updates['author'];
+            if (isset($updates['email']))       $p[2]  = $updates['email'];
+            if (isset($updates['category']))    $p[8]  = $updates['category'];
+            if (isset($updates['name']))        $p[9]  = $updates['name'];
+            if (isset($updates['description'])) $p[12] = $updates['description'];
+            if (isset($updates['shortlisted'])) $p[15] = $updates['shortlisted'] ? 'true' : 'false';
+        }
+        $newRows[] = $p;
+    }
+
+    if ($found) {
+        write_csv_locked(REGISTRATIONS_CSV, $newRows);
+        send_json(['success' => true]);
+    } else {
+        send_json(['error' => 'Fotografia nenájdená'], 404);
+    }
+}
+
 // ============================================================
 // === ADMIN: ZMAZANIE JEDNEJ FOTKY
 // ============================================================
