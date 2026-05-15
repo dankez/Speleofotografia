@@ -279,14 +279,14 @@ if ($path === '/public/gallery' && $method === 'GET') {
     $all = read_registrations();
     $s = read_settings();
 
-    // Hlasy
+    // Hlasy - zjednotené čítanie
     $votes = [];
-    if (file_exists(PUBLIC_VOTES_CSV)) {
-        $vlines = file(PUBLIC_VOTES_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-        array_shift($vlines);
-        foreach ($vlines as $vl) {
-            $vp = str_getcsv($vl);
-            if (!empty($vp[0])) $votes[$vp[0]] = ($votes[$vp[0]] ?? 0) + 1;
+    $vrows = read_csv_locked(PUBLIC_VOTES_CSV);
+    if (!empty($vrows)) {
+        array_shift($vrows); // header
+        foreach ($vrows as $vr) {
+            $pid = $vr[0] ?? '';
+            if ($pid) $votes[$pid] = ($votes[$pid] ?? 0) + 1;
         }
     }
 
@@ -296,14 +296,12 @@ if ($path === '/public/gallery' && $method === 'GET') {
         $gallery[] = [
             'id'          => $p['id'],
             'category'    => $p['category'],
-            'name'        => $p['name'],           // názov fotky (nie autora)
+            'name'        => $p['name'],
             'description' => $p['description'],
             'webPath'     => $p['webPath'],
             'voteCount'   => $votes[$p['id']] ?? 0,
-            // autor je ANONYMIZOVANÝ – neprenášame email ani meno
         ];
     }
-    // Náhodné zoradenie pri každom načítaní
     shuffle($gallery);
     send_json($gallery);
 }
@@ -327,7 +325,13 @@ if ($path === '/public/vote' && $method === 'POST') {
 
     // Skontroluj duplikát v uzamknutom režime
     $rows = read_csv_locked(PUBLIC_VOTES_CSV);
-    $header = array_shift($rows);
+    if (empty($rows)) {
+        // Ak by read_csv_locked zlyhal hneď po ensure_csv
+        $header = ['photoId', 'createdAt', 'voterId'];
+    } else {
+        $header = array_shift($rows);
+    }
+
     foreach ($rows as $r) {
         if (($r[0] ?? '') === $photoId && ($r[2] ?? '') === $voterId) {
             send_json(['error' => 'Z tohto zariadenia ste už za túto fotku hlasovali'], 429);
@@ -336,10 +340,14 @@ if ($path === '/public/vote' && $method === 'POST') {
 
     $rows[] = [$photoId, date('c'), $voterId];
     array_unshift($rows, $header);
-    write_csv_locked(PUBLIC_VOTES_CSV, $rows);
-
-    dlog("VOTE: photoId=$photoId voterId=$voterId");
-    send_json(['success' => true]);
+    
+    if (write_csv_locked(PUBLIC_VOTES_CSV, $rows)) {
+        dlog("VOTE: photoId=$photoId voterId=$voterId");
+        send_json(['success' => true]);
+    } else {
+        dlog("VOTE ERROR: failed to write to " . PUBLIC_VOTES_CSV);
+        send_json(['error' => 'Chyba pri zápise hlasu'], 500);
+    }
 }
 
 if ($path === '/public/my-votes' && $method === 'GET') {
