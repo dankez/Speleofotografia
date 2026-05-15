@@ -41,6 +41,7 @@ export interface Photo {
   shortlisted?: boolean;
   averageScore?: number;
   voteCount?: number;
+  originalExists?: boolean;
 }
 
 export interface Rating {

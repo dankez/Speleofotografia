@@ -404,6 +404,29 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
     }
   };
 
+  const resetSystem = async () => {
+    const msg = lang === "sk" 
+      ? "VAROVANIE: Táto operácia nenávratne vymaže VŠETKY fotografie, hodnotenia, hlasy aj porotcov. Ste si istý?" 
+      : "WARNING: This will permanently delete ALL photos, ratings, votes and jury members. Are you sure?";
+    
+    if (!confirm(msg)) return;
+
+    try {
+      const res = await fetch("/api/admin/system-reset", { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        alert(data.message);
+        fetchData();
+        setActiveTab("stats");
+      } else {
+        alert("Error: " + (data.error || "Unknown"));
+      }
+    } catch (e) {
+      console.error(e);
+      alert("System reset failed.");
+    }
+  };
+
   const handleBulkUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files?.length) return;
     
@@ -1565,6 +1588,24 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                   </button>
                 </div>
               )}
+
+              {/* Danger Zone - Moved to bottom */}
+              <div className="p-8 border-2 border-red-200 bg-red-50/30 space-y-6">
+                <div className="space-y-2">
+                  <h4 className="text-sm font-black uppercase tracking-widest text-red-600">Danger Zone: Factory Reset</h4>
+                  <p className="text-[11px] text-red-600/80 leading-relaxed font-bold uppercase">
+                    Tento nástroj vráti systém do stavu 0. Vymaže všetky fotografie, databázy hlasov, hodnotenia a zoznam porotcov. 
+                    Administrátori a základné nastavenia súťaže zostanú zachované.
+                  </p>
+                </div>
+                <button 
+                  onClick={resetSystem}
+                  className="px-8 py-4 bg-red-600 text-white text-[11px] font-black uppercase tracking-[2px] hover:bg-red-700 transition-colors flex items-center gap-2 shadow-lg"
+                >
+                  <AlertTriangle size={14} />
+                  Force Clear DB / FS
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -1864,7 +1905,12 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                       </button>
                     </div>
                     <div className="absolute inset-x-0 bottom-0 p-3 bg-gradient-to-t from-ink/90 to-transparent">
-                      <p className="text-[10px] text-white font-bold truncate leading-none mb-1">{photo.name}</p>
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <p className="text-[10px] text-white font-bold truncate leading-none">{photo.name}</p>
+                        {photo.originalExists === false && (
+                          <span className="shrink-0 px-1 py-0.5 bg-white/20 text-[6px] text-white font-black uppercase tracking-tighter rounded-sm">Archiv</span>
+                        )}
+                      </div>
                       <p className="text-[8px] text-white/60 truncate leading-none uppercase tracking-tight">{photo.author}</p>
                     </div>
                   </div>
@@ -1914,7 +1960,12 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                         </td>
                         <td className="p-4">
                            <div className="space-y-1">
-                            <p className="text-xs font-bold tracking-tight text-ink">{photo.name}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="text-xs font-bold tracking-tight text-ink">{photo.name}</p>
+                              {photo.originalExists === false && (
+                                <span className="px-1.5 py-0.5 bg-paper border border-border text-[8px] font-bold text-muted uppercase tracking-tighter">Archivované</span>
+                              )}
+                            </div>
                             <p className="text-[10px] text-muted font-bold uppercase tracking-tight">{photo.author}</p>
                           </div>
                         </td>
@@ -2180,9 +2231,16 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                       <div className="space-y-6">
                         <div className="flex justify-between items-start">
                           <div>
-                            <p className="text-accent text-[11px] font-bold uppercase tracking-[2px] mb-1">
-                              {settings.categories.find(c => c.id === selectedPhoto.category)?.[lang === "sk" ? "nameSk" : "nameEn"] || selectedPhoto.category}
-                            </p>
+                            <div className="flex items-center gap-3 mb-1">
+                              <p className="text-accent text-[11px] font-bold uppercase tracking-[2px]">
+                                {settings.categories.find(c => c.id === selectedPhoto.category)?.[lang === "sk" ? "nameSk" : "nameEn"] || selectedPhoto.category}
+                              </p>
+                              {selectedPhoto.originalExists === false && (
+                                <span className="px-1.5 py-0.5 bg-red-100 text-red-600 text-[8px] font-black uppercase tracking-widest rounded-sm border border-red-200">
+                                  {lang === "sk" ? "Archivované v PC" : "Archived in PC"}
+                                </span>
+                              )}
+                            </div>
                             <h3 className="text-2xl font-light tracking-tight">{selectedPhoto.name}</h3>
                           </div>
                           <button onClick={() => setSelectedPhoto(null)} className="text-muted hover:text-ink">
@@ -2247,13 +2305,19 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                       </div>
 
                       <div className="pt-6 flex gap-4">
-                        <a 
-                          href={`/uploads/${selectedPhoto.originalPath}`} 
-                          download 
-                          className="flex-1 py-3 border border-ink text-ink text-center text-[10px] font-bold uppercase tracking-widest hover:bg-ink hover:text-white transition-all"
-                        >
-                          {lang === "sk" ? "Stiahnuť originál" : "Download Original"}
-                        </a>
+                        {selectedPhoto.originalExists !== false ? (
+                          <a 
+                            href={`/uploads/${selectedPhoto.originalPath}`} 
+                            download 
+                            className="flex-1 py-3 border border-ink text-ink text-center text-[10px] font-bold uppercase tracking-widest hover:bg-ink hover:text-white transition-all"
+                          >
+                            {lang === "sk" ? "Stiahnuť originál" : "Download Original"}
+                          </a>
+                        ) : (
+                          <div className="flex-1 py-3 border border-border text-muted text-center text-[10px] font-bold uppercase tracking-widest bg-paper cursor-not-allowed">
+                            {lang === "sk" ? "Originál presunutý do archívu" : "Original Moved to Archive"}
+                          </div>
+                        )}
                         <button 
                           onClick={() => { setSelectedPhoto(null); deletePhoto(selectedPhoto.id); }}
                           className="px-6 py-3 bg-red-500 text-white hover:bg-red-600 transition-colors"

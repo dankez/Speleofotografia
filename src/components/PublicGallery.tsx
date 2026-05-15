@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Heart, Loader2, Maximize2, X, ChevronLeft, ChevronRight, Info } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/src/lib/utils";
@@ -13,14 +13,31 @@ interface PublicPhoto {
   voteCount?: number;
 }
 
-export default function PublicGallery({ lang }: { lang: Lang }) {
+export default function PublicGallery({ lang, isIframe = false }: { lang: Lang, isIframe?: boolean }) {
   const [photos, setPhotos] = useState<PublicPhoto[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);
   const [votedIds, setVotedIds] = useState<string[]>([]);
   const [selectedPhoto, setSelectedPhoto] = useState<PublicPhoto | null>(null);
   const [filter, setFilter] = useState<string>("all");
+  
+  // Detekcia stĺpcov z URL alebo default
+  const columns = useMemo(() => {
+    const params = new URLSearchParams(window.location.search);
+    const colsParam = params.get("cols");
+    if (colsParam) return parseInt(colsParam);
+    return isIframe ? 3 : 0; // 0 znamená pôvodná responzívna logika
+  }, [isIframe]);
+
   const filteredPhotos = photos.filter(p => filter === "all" || p.category === filter);
+
+  const columnClass = useMemo(() => {
+    if (columns === 1) return "columns-1";
+    if (columns === 2) return "columns-2";
+    if (columns === 3) return "columns-3";
+    if (columns === 4) return "columns-4";
+    return "columns-1 sm:columns-2 lg:columns-3 xl:columns-4";
+  }, [columns]);
 
   const handleNext = () => {
     if (!selectedPhoto) return;
@@ -169,8 +186,9 @@ export default function PublicGallery({ lang }: { lang: Lang }) {
         </div>
       </div>
 
-      <div className="columns-1 sm:columns-2 lg:columns-3 xl:columns-4 gap-3 md:gap-4 space-y-3 md:space-y-4 px-3 md:px-4 max-w-[1800px] mx-auto">
+      <div className={cn(columnClass, "gap-3 md:gap-4 space-y-3 md:space-y-4 px-3 md:px-4 max-w-[1800px] mx-auto")}>
         {filteredPhotos.map((photo) => (
+
           <motion.div
             layout
             key={photo.id}
@@ -181,7 +199,7 @@ export default function PublicGallery({ lang }: { lang: Lang }) {
           >
             <img 
               src={`/uploads/${photo.webPath || (photo.id + ".webp")}`} 
-              className="w-full h-auto grayscale-[30%] md:grayscale-[50%] group-hover:grayscale-0 transition-all duration-500"
+              className="w-full h-auto transition-transform duration-700 ease-in-out group-hover:scale-110"
               alt={photo.name}
               loading="lazy"
             />
@@ -238,12 +256,27 @@ export default function PublicGallery({ lang }: { lang: Lang }) {
                   <ChevronLeft size={32} />
                 </button>
 
-                <motion.img 
-                  key={selectedPhoto.id}
-                  layoutId={selectedPhoto.id}
-                  src={`/uploads/${selectedPhoto.webPath || (selectedPhoto.id + ".webp")}`}
-                  className="max-w-full max-h-[60vh] md:max-h-[80vh] object-contain shadow-2xl border border-white/5"
-                />
+                <div className="relative group/photoContainer">
+                  <motion.img 
+                    key={selectedPhoto.id}
+                    layoutId={selectedPhoto.id}
+                    src={`/uploads/${selectedPhoto.webPath || (selectedPhoto.id + ".webp")}`}
+                    className="max-w-full max-h-[60vh] md:max-h-[80vh] object-contain shadow-2xl border border-white/5"
+                  />
+                  
+                  {/* Floating heart on large photo */}
+                  <button 
+                    onClick={(e) => handleVote(selectedPhoto.id, e)}
+                    className={cn(
+                      "absolute top-4 right-4 p-4 rounded-full transition-all duration-300 shadow-xl",
+                      votedIds.includes(selectedPhoto.id) 
+                        ? "bg-accent text-white scale-110" 
+                        : "bg-white/20 text-white hover:bg-accent backdrop-blur-md"
+                    )}
+                  >
+                    <Heart size={24} fill={votedIds.includes(selectedPhoto.id) ? "currentColor" : "none"} />
+                  </button>
+                </div>
 
                 <button 
                   onClick={(e) => { e.stopPropagation(); handleNext(); }}

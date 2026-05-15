@@ -68,9 +68,20 @@ export default function App() {
   const [lang, setLang] = useState<Lang>("sk");
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isIframe, setIsIframe] = useState(false);
 
   useEffect(() => {
+    // Detekcia iframe (automatická + manuálna cez parameter)
     const params = new URLSearchParams(window.location.search);
+    const isIframeMode = window.self !== window.top || params.get("mode") === "iframe";
+    setIsIframe(isIframeMode);
+
+    // Explicitné nastavenie pohľadu cez URL
+    const viewParam = params.get("view") as View;
+    if (viewParam && ["home", "admin", "evaluator", "admin-setup", "public"].includes(viewParam)) {
+      setCurrentView(viewParam);
+    }
+
     const evalParam = params.get("eval");
     if (evalParam) {
       setEvalId(evalParam);
@@ -137,88 +148,92 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-paper text-ink font-sans selection:bg-ink selection:text-paper overflow-hidden">
-      {/* Sidebar */}
-      <aside className="w-[240px] bg-[#f9f9f9] border-r border-border p-6 flex flex-col justify-between shrink-0 hidden md:flex">
-        <div>
-          <button 
-            onClick={() => setCurrentView("home")}
-            className="w-full text-left mb-10 group"
-          >
-            {settings?.logoUrl && (
-              <img 
-                src={settings.logoUrl} 
-                alt="Contest Logo" 
-                className="max-h-20 max-w-full mb-4 object-contain grayscale group-hover:grayscale-0 transition-all"
-              />
-            )}
-            <div className="text-[14px] font-extrabold tracking-[2px] uppercase border-l-[3px] border-ink pl-3 group-hover:border-accent transition-colors">
-              {lang === "sk" ? settings?.contestNameSk : settings?.contestNameEn}
-            </div>
-          </button>
-          
-          <nav className="space-y-1">
-            {navItems.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => setCurrentView(item.id as View)}
-                className={cn(
-                  "w-full text-left py-3 text-[13px] font-medium transition-all uppercase tracking-widest border-b border-transparent",
-                  currentView === item.id 
-                    ? "text-ink border-ink" 
-                    : "text-muted hover:text-ink"
-                )}
-              >
-                {item.label}
-              </button>
-            ))}
-          </nav>
-        </div>
+      {/* Sidebar - skrytý v iframe */}
+      {!isIframe && (
+        <aside className="w-[240px] bg-[#f9f9f9] border-r border-border p-6 flex flex-col justify-between shrink-0 hidden md:flex">
+          <div>
+            <button 
+              onClick={() => setCurrentView("home")}
+              className="w-full text-left mb-10 group"
+            >
+              {settings?.logoUrl && (
+                <img 
+                  src={settings.logoUrl} 
+                  alt="Contest Logo" 
+                  className="max-h-20 max-w-full mb-4 object-contain grayscale group-hover:grayscale-0 transition-all"
+                />
+              )}
+              <div className="text-[14px] font-extrabold tracking-[2px] uppercase border-l-[3px] border-ink pl-3 group-hover:border-accent transition-colors">
+                {lang === "sk" ? settings?.contestNameSk : settings?.contestNameEn}
+              </div>
+            </button>
+            
+            <nav className="space-y-1">
+              {navItems.map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => setCurrentView(item.id as View)}
+                  className={cn(
+                    "w-full text-left py-3 text-[13px] font-medium transition-all uppercase tracking-widest border-b border-transparent",
+                    currentView === item.id 
+                      ? "text-ink border-ink" 
+                      : "text-muted hover:text-ink"
+                  )}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </nav>
+          </div>
 
-        <div className="space-y-6">
-          <div className="flex gap-2">
-            <button 
-              onClick={() => setLang("sk")}
-              className={cn("text-[10px] uppercase font-bold tracking-widest border border-border px-2 py-1", lang === "sk" ? "bg-ink text-paper" : "text-muted")}
-            >SK</button>
-            <button 
-              onClick={() => setLang("en")}
-              className={cn("text-[10px] uppercase font-bold tracking-widest border border-border px-2 py-1", lang === "en" ? "bg-ink text-paper" : "text-muted")}
-            >EN</button>
-          </div>
-          
-          <div className="space-y-4">
-            <label className="block text-[11px] font-bold uppercase text-muted tracking-tight">
-              {lang === "sk" ? "Aktuálny stav" : "Current Status"}
-            </label>
-            <div className="text-[12px] leading-relaxed opacity-80">
-              <p>{settings?.edition}</p>
-              <p>{lang === "sk" ? settings?.museumNameSk : settings?.museumNameEn}</p>
-              <p className="mt-2 font-bold uppercase tracking-tighter">SMOPAJ</p>
+          <div className="space-y-6">
+            <div className="flex gap-2">
+              <button 
+                onClick={() => setLang("sk")}
+                className={cn("text-[10px] uppercase font-bold tracking-widest border border-border px-2 py-1", lang === "sk" ? "bg-ink text-paper" : "text-muted")}
+              >SK</button>
+              <button 
+                onClick={() => setLang("en")}
+                className={cn("text-[10px] uppercase font-bold tracking-widest border border-border px-2 py-1", lang === "en" ? "bg-ink text-paper" : "text-muted")}
+              >EN</button>
+            </div>
+            
+            <div className="space-y-4">
+              <label className="block text-[11px] font-bold uppercase text-muted tracking-tight">
+                {lang === "sk" ? "Aktuálny stav" : "Current Status"}
+              </label>
+              <div className="text-[12px] leading-relaxed opacity-80">
+                <p>{settings?.edition}</p>
+                <p>{lang === "sk" ? settings?.museumNameSk : settings?.museumNameEn}</p>
+                <p className="mt-2 font-bold uppercase tracking-tighter">SMOPAJ</p>
+              </div>
             </div>
           </div>
-        </div>
-      </aside>
+        </aside>
+      )}
 
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col overflow-hidden">
-        {/* Header Bar */}
-        <header className="h-16 px-10 border-b border-border flex items-center justify-between bg-white shrink-0">
-          <div>
-            <h1 className="text-[18px] font-light tracking-tight">
-              {currentView === "home" && (lang === "sk" ? "Prihláška / Application Form" : "Application Form")}
-              {currentView === "public" && (lang === "sk" ? "Galéria / Gallery" : "Public Gallery")}
-              {currentView === "admin" && (lang === "sk" ? "Administrácia / Admin" : "Admin Dashboard")}
-              {currentView === "evaluator" && (lang === "sk" ? "Hodnotenie / Evaluation" : "Evaluation System")}
-            </h1>
-          </div>
-          <div className="bg-accent text-white text-[10px] px-2 py-1 font-bold tracking-widest uppercase">
-            SECURE ACCESS
-          </div>
-        </header>
+        {/* Header Bar - skrytý v iframe */}
+        {!isIframe && (
+          <header className="h-16 px-10 border-b border-border flex items-center justify-between bg-white shrink-0">
+            <div>
+              <h1 className="text-[18px] font-light tracking-tight">
+                {currentView === "home" && (lang === "sk" ? "Prihláška / Application Form" : "Application Form")}
+                {currentView === "public" && (lang === "sk" ? "Galéria / Gallery" : "Public Gallery")}
+                {currentView === "admin" && (lang === "sk" ? "Administrácia / Admin" : "Admin Dashboard")}
+                {currentView === "evaluator" && (lang === "sk" ? "Hodnotenie / Evaluation" : "Evaluation System")}
+              </h1>
+            </div>
+            <div className="bg-accent text-white text-[10px] px-2 py-1 font-bold tracking-widest uppercase">
+              SECURE ACCESS
+            </div>
+          </header>
+        )}
 
         {/* Scrollable View Content */}
         <div className="flex-1 overflow-y-auto">
-          <div className="p-10 max-w-6xl mx-auto">
+          <div className={cn("p-10 mx-auto", isIframe ? "max-w-full p-0" : "max-w-6xl")}>
             {loading ? (
               <div className="flex items-center justify-center h-64">
                 <Loader2 size={32} className="animate-spin text-muted" />
@@ -272,7 +287,7 @@ export default function App() {
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
                 >
-                  <PublicGallery lang={lang} />
+                  <PublicGallery lang={lang} isIframe={isIframe} />
                 </motion.div>
               )}
 
