@@ -763,6 +763,37 @@ if (in_array($path, ['/admin/bulk-upload', '/admin/stress-upload']) && $method =
     send_json(['success' => true, 'count' => 10, 'message' => 'Generovaných 10 testovacích záznamov']);
 }
 
+if ($path === '/admin/system-reset' && $method === 'POST') {
+    dlog("ADMIN: SYSTEM RESET triggered");
+    
+    // 1. Vyčisti CSV databázy (ponechaj len hlavičky)
+    $regHeader = ['id','author','email','instagram','webpage','address','gdprConsent','rulesConsent','category','name','originalPath','webPath','description','metadata','createdAt','shortlisted'];
+    write_csv_locked(REGISTRATIONS_CSV, [$regHeader]);
+    
+    $ratHeader = ['photoId','judgeName','judgeId','score','timestamp'];
+    write_csv_locked(RATINGS_CSV, [$ratHeader]);
+    
+    $pvHeader = ['photoId','createdAt','voterId'];
+    write_csv_locked(PUBLIC_VOTES_CSV, [$pvHeader]);
+    
+    // 2. Vymaž porotcov
+    file_put_contents(EVALUATORS_JSON, json_encode([], JSON_PRETTY_PRINT));
+    
+    // 3. Vymaž všetky nahrané súbory
+    $cleanDir = function($dir) {
+        if (!is_dir($dir)) return;
+        $files = scandir($dir);
+        foreach ($files as $f) {
+            if ($f === '.' || $f === '..' || $f === '.gitkeep') continue;
+            if (is_file($dir.'/'.$f)) unlink($dir.'/'.$f);
+        }
+    };
+    $cleanDir(UPLOADS_DIR);
+    $cleanDir(ORIGINALS_DIR);
+    
+    send_json(['success' => true, 'message' => 'Systém bol kompletne vyčistený (DB aj FS)']);
+}
+
 // ============================================================
 // === ADMIN: ZMAZANIE JEDNEJ FOTKY
 // ============================================================
