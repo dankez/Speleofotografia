@@ -1,0 +1,2 @@
+id,author,email,instagram,webpage,address,gdprConsent,rulesConsent,category,name,originalPath,webPath,description,metadata,createdAt,shortlisted
+test_photo_1,"Author","auth@ex.com","","","",true,true,"A","Test Photo","orig.jpg","web.webp","Desc","{}",2026-05-15T06:34:20+00:00,true

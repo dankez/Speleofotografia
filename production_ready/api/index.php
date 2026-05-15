@@ -474,7 +474,14 @@ if ($path === '/admin/settings' && $method === 'POST') {
     send_json(['success' => true]);
 }
 
-if ($path === '/admin/photos' && $method === 'GET') { send_json(read_registrations()); }
+if ($path === '/admin/photos' && $method === 'GET') { 
+    $photos = read_registrations();
+    foreach ($photos as &$p) {
+        $filePath = ORIGINALS_DIR . '/' . ($p['originalPath'] ?? '---');
+        $p['originalExists'] = !empty($p['originalPath']) && file_exists($filePath);
+    }
+    send_json($photos); 
+}
 if ($path === '/admin/list'   && $method === 'GET') { 
     $admins = file_exists(ADMINS_JSON) ? json_decode(file_get_contents(ADMINS_JSON), true) : [];
     $unique = [];

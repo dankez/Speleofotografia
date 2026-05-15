@@ -1,0 +1,10 @@
+RewriteEngine On
+RewriteBase /
+
+# 1. Smerovanie API požiadaviek na index.php v api/ adresári
+RewriteRule ^api/(.*)$ api/index.php [L,QSA]
+
+# 2. React Router: Obslúž index.html pre všetky cesty okrem existujúcich súborov/priečinkov
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule . index.html [L]
