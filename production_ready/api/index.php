@@ -232,14 +232,18 @@ if ($path === '/settings' && $method === 'GET') {
 
 if ($path === '/stats' && $method === 'GET') {
     $photos = read_registrations();
+    $validIds = array_column($photos, 'id');
+    $validIdMap = array_flip($validIds);
+
     $votes = [];
-    $vrows = read_csv_locked(PUBLIC_VOTES_CSV);
     $totalVotes = 0;
+    $vrows = read_csv_locked(PUBLIC_VOTES_CSV);
     if (!empty($vrows)) {
         array_shift($vrows);
         foreach ($vrows as $v) {
-            if (!empty($v[0])) {
-                $votes[$v[0]] = ($votes[$v[0]] ?? 0) + 1;
+            $pid = $v[0] ?? '';
+            if ($pid && isset($validIdMap[$pid])) {
+                $votes[$pid] = ($votes[$pid] ?? 0) + 1;
                 $totalVotes++;
             }
         }
@@ -552,11 +556,18 @@ if ($path === '/admin/dashboard-stats' && $method === 'GET') {
         $ratedCount = count($ratedPhotos);
     }
 
-    // Počet verejných hlasov
+    // Počet verejných hlasov (len pre existujúce fotky)
     $publicVoteCount = 0;
+    $validIds = array_column($photos, 'id');
+    $validIdMap = array_flip($validIds);
     $vrows = read_csv_locked(PUBLIC_VOTES_CSV);
     if (!empty($vrows)) {
-        $publicVoteCount = max(0, count($vrows) - 1);
+        array_shift($vrows);
+        foreach ($vrows as $v) {
+            if (!empty($v[0]) && isset($validIdMap[$v[0]])) {
+                $publicVoteCount++;
+            }
+        }
     }
 
     send_json([
