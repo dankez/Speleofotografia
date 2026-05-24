@@ -52,6 +52,10 @@ function get_auth_token() {
     if (preg_match('/Bearer\s+(.+)$/i', $authHeader, $matches)) {
         return trim($matches[1]);
     }
+    // Fallback na query parameter (napr. pre sťahovanie CSV/ZIP cez prehliadač)
+    if (!empty($_GET['token'])) {
+        return trim($_GET['token']);
+    }
     return null;
 }
 

@@ -1,10 +1,10 @@
 RewriteEngine On
 RewriteBase /
 
-# 1. Smerovanie API požiadaviek na index.php v api/ adresári
+# 1. Forward all API requests to the PHP backend
 RewriteRule ^api/(.*)$ api/index.php [L,QSA]
 
-# 2. React Router: Obslúž index.html pre všetky cesty okrem existujúcich súborov/priečinkov
+# 2. React Router: Serve index.html for all non-file/non-dir routes
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule . index.html [L]

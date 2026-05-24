@@ -484,19 +484,23 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
   };
 
   const exportResults = () => {
-    window.location.href = "/api/admin/export/results-csv";
+    const token = localStorage.getItem("speleofoto_token") || "";
+    window.location.href = `/api/admin/export/results-csv?token=${encodeURIComponent(token)}`;
   };
 
   const exportPublicVotes = () => {
-    window.location.href = "/api/admin/export/public-votes-csv";
+    const token = localStorage.getItem("speleofoto_token") || "";
+    window.location.href = `/api/admin/export/public-votes-csv?token=${encodeURIComponent(token)}`;
   };
 
   const exportRatings = () => {
-    window.location.href = "/api/admin/export/ratings-csv";
+    const token = localStorage.getItem("speleofoto_token") || "";
+    window.location.href = `/api/admin/export/ratings-csv?token=${encodeURIComponent(token)}`;
   };
 
   const downloadTotalArchive = () => {
-    window.location.href = "/api/admin/export/total-archive";
+    const token = localStorage.getItem("speleofoto_token") || "";
+    window.location.href = `/api/admin/export/total-archive?token=${encodeURIComponent(token)}`;
   };
 
   const fetchData = async () => {
