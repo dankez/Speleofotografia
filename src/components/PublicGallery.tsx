@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { Heart, Loader2, Maximize2, X, ChevronLeft, ChevronRight, Info } from "lucide-react";
+import { Heart, Loader2, Maximize2, X, ChevronLeft, ChevronRight, Info, Shield } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/src/lib/utils";
 import { Lang, Settings } from "../App";
@@ -20,6 +20,10 @@ export default function PublicGallery({ lang, isIframe = false }: { lang: Lang, 
   const [votedIds, setVotedIds] = useState<string[]>([]);
   const [selectedPhoto, setSelectedPhoto] = useState<PublicPhoto | null>(null);
   const [filter, setFilter] = useState<string>("all");
+  const [votingPhotoId, setVotingPhotoId] = useState<string | null>(null);
+  const [showTurnstileModal, setShowTurnstileModal] = useState(false);
+  const [turnstileError, setTurnstileError] = useState<string | null>(null);
+  const [isSubmittingVote, setIsSubmittingVote] = useState(false);
   
   // Detekcia stĺpcov z URL alebo default
   const columns = useMemo(() => {
@@ -99,11 +103,24 @@ export default function PublicGallery({ lang, isIframe = false }: { lang: Lang, 
     }
   };
 
-  const handleVote = async (photoId: string, e: any) => {
+  const handleVote = (photoId: string, e: any) => {
     e.stopPropagation();
     if (votedIds.includes(photoId)) return;
 
-    // Anonymný fingerprint zo localStorage – persistent medzi reloadmi
+    const turnstileEnabled = settings?.turnstileEnabled !== false && settings?.turnstileEnabled !== 'false';
+    if (!turnstileEnabled) {
+      submitVote(photoId, "");
+    } else {
+      setVotingPhotoId(photoId);
+      setTurnstileError(null);
+      setShowTurnstileModal(true);
+    }
+  };
+
+  const submitVote = async (photoId: string, token: string) => {
+    setIsSubmittingVote(true);
+    setTurnstileError(null);
+
     let fingerprint = localStorage.getItem("speleo_fp");
     if (!fingerprint) {
       fingerprint = crypto.randomUUID();
@@ -114,26 +131,63 @@ export default function PublicGallery({ lang, isIframe = false }: { lang: Lang, 
       const res = await fetch("/api/public/vote", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ photoId, fingerprint })
+        body: JSON.stringify({ photoId, fingerprint, turnstileToken: token })
       });
       
+      const data = await res.json();
+
       if (res.ok) {
         const newVoted = [...votedIds, photoId];
         setVotedIds(newVoted);
         localStorage.setItem("speleo_voted_ids", JSON.stringify(newVoted));
-        // Aktualizácia počtu hlasov v lokálnom state (bez reloadu)
         setPhotos(prev => prev.map(p => 
           p.id === photoId ? { ...p, voteCount: (p.voteCount || 0) + 1 } : p
         ));
-      } else if (res.status === 429) {
-        // Duplikát - pridáme do lokálneho zoznamu aj tak
-        setVotedIds(prev => [...prev, photoId]);
-        localStorage.setItem("speleo_voted_ids", JSON.stringify([...votedIds, photoId]));
+        setShowTurnstileModal(false);
+        setVotingPhotoId(null);
+      } else {
+        setTurnstileError(data.error || (lang === "sk" ? "Chyba pri hlasovaní" : "Error voting"));
+        if (res.status === 429) {
+          setVotedIds(prev => [...prev, photoId]);
+          localStorage.setItem("speleo_voted_ids", JSON.stringify([...votedIds, photoId]));
+          setTimeout(() => {
+            setShowTurnstileModal(false);
+            setVotingPhotoId(null);
+          }, 1500);
+        }
       }
     } catch (e) {
       console.error(e);
+      setTurnstileError(lang === "sk" ? "Chyba pripojenia" : "Connection error");
+    } finally {
+      setIsSubmittingVote(false);
     }
   };
+
+  useEffect(() => {
+    if (showTurnstileModal && votingPhotoId) {
+      const timer = setTimeout(() => {
+        if ((window as any).turnstile) {
+          try {
+            (window as any).turnstile.render("#turnstile-container", {
+              sitekey: settings?.turnstileSiteKey || "1x00000000000000000000AA",
+              callback: (token: string) => {
+                submitVote(votingPhotoId, token);
+              },
+              "error-callback": () => {
+                setTurnstileError(lang === "sk" ? "Overenie Turnstile zlyhalo." : "Turnstile verification failed.");
+              }
+            });
+          } catch (e) {
+            console.error("Turnstile render error:", e);
+          }
+        } else {
+          setTurnstileError(lang === "sk" ? "Chyba načítania ochrany proti botom." : "Failed to load bot protection.");
+        }
+      }, 150);
+      return () => clearTimeout(timer);
+    }
+  }, [showTurnstileModal, votingPhotoId]);
 
   if (loading) return (
     <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
@@ -329,6 +383,67 @@ export default function PublicGallery({ lang, isIframe = false }: { lang: Lang, 
                 </div>
               </div>
             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Turnstile Verification Modal */}
+      <AnimatePresence>
+        {showTurnstileModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[200] bg-ink/75 backdrop-blur-md flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              className="bg-paper max-w-sm w-full p-6 md:p-8 rounded-sm shadow-2xl relative border border-border"
+            >
+              <button 
+                onClick={() => { setShowTurnstileModal(false); setVotingPhotoId(null); }}
+                className="absolute top-4 right-4 text-muted hover:text-ink transition-colors"
+                disabled={isSubmittingVote}
+              >
+                <X size={18} />
+              </button>
+
+              <div className="text-center space-y-4">
+                <div className="mx-auto w-12 h-12 bg-accent/10 rounded-full flex items-center justify-center text-accent">
+                  <Shield size={24} />
+                </div>
+                
+                <div className="space-y-1.5">
+                  <h3 className="text-lg font-light uppercase tracking-tight text-ink">
+                    {lang === "sk" ? "Overenie hlasu" : "Verify Vote"}
+                  </h3>
+                  <p className="text-xs text-muted leading-relaxed">
+                    {lang === "sk" 
+                      ? "Pre započítanie vášho hlasu prosím potvrďte, že ste človek." 
+                      : "To submit your vote, please confirm you are human."}
+                  </p>
+                </div>
+
+                {/* Turnstile Container */}
+                <div className="flex justify-center py-4 min-h-[74px]">
+                  <div id="turnstile-container"></div>
+                </div>
+
+                {isSubmittingVote && (
+                  <p className="text-[10px] font-bold text-accent uppercase tracking-widest animate-pulse">
+                    {lang === "sk" ? "Zapisujem hlas..." : "Recording vote..."}
+                  </p>
+                )}
+
+                {turnstileError && (
+                  <p className="text-xs font-bold text-red-600 bg-red-50 p-2.5 border border-red-100 rounded-sm">
+                    {turnstileError}
+                  </p>
+                )}
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>

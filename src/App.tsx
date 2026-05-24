@@ -60,6 +60,8 @@ export interface Settings {
   watermarkFontSize?: number;
   watermarkColor?: string;
   googleAnalyticsId?: string;
+  turnstileEnabled?: boolean;
+  turnstileSiteKey?: string;
 }
 
 export default function App() {

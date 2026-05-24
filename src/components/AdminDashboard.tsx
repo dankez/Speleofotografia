@@ -50,6 +50,11 @@ interface ContestSettings {
   emailFrom: string;
   adminEmail: string;
   adminPass: string;
+  turnstileEnabled: boolean;
+  turnstileSiteKey: string;
+  turnstileSecretKey: string;
+  rateLimitVotes: string;
+  rateLimitWindow: string;
 }
 
 export default function AdminDashboard({ lang }: { lang: Lang }) {
@@ -97,7 +102,12 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
     smtpPass: "",
     emailFrom: "",
     adminEmail: "",
-    adminPass: ""
+    adminPass: "",
+    turnstileEnabled: true,
+    turnstileSiteKey: "1x00000000000000000000AA",
+    turnstileSecretKey: "1x0000000000000000000000000000000E",
+    rateLimitVotes: "5",
+    rateLimitWindow: "3600"
   });
 
   const toggleSelectPhoto = (id: string) => {
@@ -1165,6 +1175,83 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                     <option value="false">No (STARTTLS)</option>
                     <option value="true">Yes (SSL/TLS)</option>
                   </select>
+                </div>
+              </div>
+
+              <h3 className="text-[11px] font-bold uppercase tracking-[2px] text-muted border-b border-border pb-2 pt-10">
+                {lang === "sk" ? "Ochrana hlasovania (Turnstile & Rate Limits)" : "Voting Protection (Turnstile & Rate Limits)"}
+              </h3>
+              
+              <div className="flex items-center justify-between p-4 bg-paper/30 border border-border mt-4">
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-ink">
+                    {lang === "sk" ? "Cloudflare Turnstile Ochrana" : "Cloudflare Turnstile Protection"}
+                  </p>
+                  <p className="text-[10px] text-muted">
+                    {lang === "sk" 
+                      ? "Aktivuje Turnstile overenie (ochrana proti botom) pre verejné hlasovanie." 
+                      : "Activates Turnstile verification (bot protection) for public voting."}
+                  </p>
+                </div>
+                <button 
+                  onClick={() => setSettings({ ...settings, turnstileEnabled: !settings.turnstileEnabled })}
+                  className={`px-4 py-2 text-[10px] font-bold uppercase tracking-widest border transition-all ${
+                    settings.turnstileEnabled 
+                      ? "bg-accent text-white border-accent" 
+                      : "bg-paper text-muted border-border hover:border-ink hover:text-ink"
+                  }`}
+                >
+                  {settings.turnstileEnabled ? (lang === "sk" ? "AKTÍVNA" : "ACTIVE") : (lang === "sk" ? "NEAKTÍVNA" : "INACTIVE")}
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase text-muted">Turnstile Site Key</label>
+                  <input 
+                    type="text" 
+                    value={settings.turnstileSiteKey || ""}
+                    onChange={e => setSettings({ ...settings, turnstileSiteKey: e.target.value })}
+                    className="w-full p-3 border border-border bg-white text-sm outline-none focus:border-ink"
+                    placeholder="1x00000000000000000000AA"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase text-muted">Turnstile Secret Key</label>
+                  <input 
+                    type="password" 
+                    value={settings.turnstileSecretKey || ""}
+                    onChange={e => setSettings({ ...settings, turnstileSecretKey: e.target.value })}
+                    className="w-full p-3 border border-border bg-white text-sm outline-none focus:border-ink"
+                    placeholder="••••••••"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase text-muted">
+                    {lang === "sk" ? "Limit hlasov z jednej IP" : "Votes Limit per IP"}
+                  </label>
+                  <input 
+                    type="text" 
+                    value={settings.rateLimitVotes || ""}
+                    onChange={e => setSettings({ ...settings, rateLimitVotes: e.target.value })}
+                    className="w-full p-3 border border-border bg-white text-sm outline-none focus:border-ink"
+                    placeholder="5"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold uppercase text-muted">
+                    {lang === "sk" ? "Časové okno limitu (sekundy)" : "Rate Limit Window (seconds)"}
+                  </label>
+                  <input 
+                    type="text" 
+                    value={settings.rateLimitWindow || ""}
+                    onChange={e => setSettings({ ...settings, rateLimitWindow: e.target.value })}
+                    className="w-full p-3 border border-border bg-white text-sm outline-none focus:border-ink"
+                    placeholder="3600"
+                  />
                 </div>
               </div>
 

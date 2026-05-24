@@ -197,6 +197,31 @@ function get_client_ip() {
     return $_SERVER['REMOTE_ADDR'] ?? 'unknown';
 }
 
+function verify_turnstile($token, $secret, $ip) {
+    if (empty($token)) return false;
+    $url = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
+    $data = [
+        'secret'   => $secret,
+        'response' => $token,
+        'remoteip' => $ip
+    ];
+    $options = [
+        'http' => [
+            'header'  => "Content-type: application/x-www-form-urlencoded\r\n",
+            'method'  => 'POST',
+            'content' => http_build_query($data),
+            'timeout' => 5
+        ]
+    ];
+    $context  = stream_context_create($options);
+    $result = @file_get_contents($url, false, $context);
+    if ($result === FALSE) {
+        return false;
+    }
+    $response = json_decode($result, true);
+    return !empty($response['success']);
+}
+
 function json_input() {
     return json_decode(file_get_contents('php://input'), true) ?? [];
 }
@@ -333,12 +358,56 @@ if ($path === '/public/vote' && $method === 'POST') {
     $data = json_input();
     $photoId    = trim($data['photoId'] ?? '');
     $fingerprint = trim($data['fingerprint'] ?? '');
+    $turnstileToken = trim($data['turnstileToken'] ?? '');
 
     if (empty($photoId)) {
         send_json(['error' => 'Chýbajúce údaje'], 400);
     }
 
+    $s = read_settings();
     $ip = get_client_ip();
+
+    // 1. IP Rate Limiting
+    $rateLimitVotes = isset($s['rateLimitVotes']) ? (int)$s['rateLimitVotes'] : 5;
+    $rateLimitWindow = isset($s['rateLimitWindow']) ? (int)$s['rateLimitWindow'] : 3600;
+    
+    if ($rateLimitVotes > 0) {
+        $limitsFile = DATA_DIR . '/rate_limits.json';
+        $limits = [];
+        if (file_exists($limitsFile)) {
+            $limits = json_decode(file_get_contents($limitsFile), true) ?? [];
+        }
+        
+        $now = time();
+        $ipVotes = $limits[$ip] ?? [];
+        
+        // Vyčistiť staré záznamy mimo časového okna
+        $ipVotesFiltered = [];
+        foreach ($ipVotes as $ts) {
+            if ($now - $ts < $rateLimitWindow) {
+                $ipVotesFiltered[] = $ts;
+            }
+        }
+        
+        if (count($ipVotesFiltered) >= $rateLimitVotes) {
+            send_json(['error' => 'Prekročili ste limit verejného hlasovania z vašej IP adresy. Skúste to neskôr.'], 429);
+        }
+        
+        // Pridaj nový záznam a ulož
+        $ipVotesFiltered[] = $now;
+        $limits[$ip] = $ipVotesFiltered;
+        file_put_contents($limitsFile, json_encode($limits, JSON_PRETTY_PRINT), LOCK_EX);
+    }
+
+    // 2. Cloudflare Turnstile Validation
+    $turnstileEnabled = !isset($s['turnstileEnabled']) || $s['turnstileEnabled'] === true || $s['turnstileEnabled'] === 'true' || $s['turnstileEnabled'] === 1;
+    if ($turnstileEnabled) {
+        $secret = !empty($s['turnstileSecretKey']) ? $s['turnstileSecretKey'] : '1x0000000000000000000000000000000E';
+        if (!verify_turnstile($turnstileToken, $secret, $ip)) {
+            send_json(['error' => 'Overenie proti robotom (Turnstile) zlyhalo. Skúste to znova.'], 400);
+        }
+    }
+
     $voterId = $fingerprint ?: $ip;
 
     ensure_csv(PUBLIC_VOTES_CSV, 'photoId,createdAt,voterId');
