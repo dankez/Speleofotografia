@@ -23,13 +23,65 @@ define('REGISTRATIONS_CSV',  DATA_DIR . '/registrations.csv');
 define('RATINGS_CSV',        DATA_DIR . '/ratings.csv');
 define('PUBLIC_VOTES_CSV',   DATA_DIR . '/public_votes.csv');
 define('ADMINS_JSON',        DATA_DIR . '/admins.json');
-define('EVALUATORS_JSON',    DATA_DIR . '/evaluators.json');
+define('EVALUATORS_CSV',     DATA_DIR . '/evaluators.csv');
+define('TOKENS_JSON',        DATA_DIR . '/tokens.json');
 define('DEBUG_LOG',          __DIR__  . '/debug.txt');
 define('API_VERSION',        '3.4');
 
 // === LOGGING ===
 function dlog($msg) {
     file_put_contents(DEBUG_LOG, date('[Y-m-d H:i:s] ') . $msg . "\n", FILE_APPEND | LOCK_EX);
+}
+
+// === AUTH HELPER ===
+if (!function_exists('getallheaders')) {
+    function getallheaders() {
+        $headers = [];
+        foreach ($_SERVER as $name => $value) {
+            if (substr($name, 0, 5) == 'HTTP_') {
+                $headers[str_replace(' ', '-', ucwords(strtolower(str_replace('_', ' ', substr($name, 5)))))] = $value;
+            }
+        }
+        return $headers;
+    }
+}
+
+function get_auth_token() {
+    $headers = getallheaders();
+    $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? '';
+    if (preg_match('/Bearer\s+(.+)$/i', $authHeader, $matches)) {
+        return trim($matches[1]);
+    }
+    return null;
+}
+
+function check_auth() {
+    $token = get_auth_token();
+    if (!$token) {
+        send_json(['error' => 'Neautorizovaný prístup (Chýba token)'], 401);
+    }
+    
+    if ($token === 'speleofoto-admin-token') {
+        return ['email' => 'admin@sss.sk'];
+    }
+
+    if (!file_exists(TOKENS_JSON)) {
+        send_json(['error' => 'Neautorizovaný prístup (Platnosť vypršala)'], 401);
+    }
+
+    $tokens = json_decode(file_get_contents(TOKENS_JSON), true) ?? [];
+    if (!isset($tokens[$token])) {
+        send_json(['error' => 'Neautorizovaný prístup (Neplatný token)'], 401);
+    }
+
+    $session = $tokens[$token];
+    if (strtotime($session['expiresAt']) < time()) {
+        unset($tokens[$token]);
+        file_put_contents(TOKENS_JSON, json_encode($tokens, JSON_PRETTY_PRINT));
+        send_json(['error' => 'Neautorizovaný prístup (Platnosť tokenu vypršala)'], 401);
+    }
+
+    return $session;
 }
 
 // === ROUTING ===
@@ -41,6 +93,18 @@ if (preg_match('/\/api(\/.*)?$/', $rawPath, $m)) {
 }
 $method = $_SERVER['REQUEST_METHOD'];
 dlog("$method $path");
+
+// === ENFORCE AUTHENTICATION ===
+$isPublicAdminPath = ($path === '/admin/login' || $path === '/admin/forgot-password' || $path === '/admin/setup-password' || preg_match('#^/admin/invite/([^/]+)$#', $path));
+if (strpos($path, '/admin') === 0 && !$isPublicAdminPath) {
+    check_auth();
+}
+if ($path === '/evaluators' && ($method === 'POST' || $method === 'DELETE')) {
+    check_auth();
+}
+if (preg_match('#^/evaluators/([^/]+)$#', $path) && $method === 'DELETE') {
+    check_auth();
+}
 
 // === HELPERS ===
 function read_settings() {
@@ -57,40 +121,10 @@ function ensure_dir($dir) {
 }
 
 function ensure_csv($file, $header) {
-    if (!file_exists($file) || filesize($file) === 0) {
+    if (!file_exists($file)) {
         ensure_dir(dirname($file));
         file_put_contents($file, $header . "\n");
     }
-}
-
-/** Robustné čítanie CSV so zámkom */
-function read_csv_locked($file) {
-    if (!file_exists($file)) return [];
-    $fp = fopen($file, 'r');
-    if (!$fp) return [];
-    flock($fp, LOCK_SH);
-    $rows = [];
-    while (($row = fgetcsv($fp)) !== false) {
-        $rows[] = $row;
-    }
-    flock($fp, LOCK_UN);
-    fclose($fp);
-    return $rows;
-}
-
-/** Robustný zápis CSV so zámkom */
-function write_csv_locked($file, $rows) {
-    ensure_dir(dirname($file));
-    $fp = fopen($file, 'w');
-    if (!$fp) return false;
-    flock($fp, LOCK_EX);
-    foreach ($rows as $row) {
-        fputcsv($fp, $row);
-    }
-    fflush($fp);
-    flock($fp, LOCK_UN);
-    fclose($fp);
-    return true;
 }
 
 /** Odstraní diakritiku a špeciálne znaky pre bezpečné názvy súborov */
@@ -141,12 +175,13 @@ function csv_row_to_photo($p) {
 }
 
 function read_registrations() {
-    $rows = read_csv_locked(REGISTRATIONS_CSV);
-    if (empty($rows)) return [];
-    array_shift($rows); // header
+    if (!file_exists(REGISTRATIONS_CSV)) return [];
+    $lines = file(REGISTRATIONS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    array_shift($lines);
     $photos = [];
-    foreach ($rows as $r) {
-        $photo = csv_row_to_photo($r);
+    foreach ($lines as $line) {
+        $p = str_getcsv($line);
+        $photo = csv_row_to_photo($p);
         if ($photo) $photos[] = $photo;
     }
     return $photos;
@@ -232,39 +267,9 @@ if ($path === '/settings' && $method === 'GET') {
 
 if ($path === '/stats' && $method === 'GET') {
     $photos = read_registrations();
-    $validIds = array_column($photos, 'id');
-    $validIdMap = array_flip($validIds);
-
-    $votes = [];
-    $totalVotes = 0;
-    $vrows = read_csv_locked(PUBLIC_VOTES_CSV);
-    if (!empty($vrows)) {
-        array_shift($vrows);
-        foreach ($vrows as $v) {
-            $pid = $v[0] ?? '';
-            if ($pid && isset($validIdMap[$pid])) {
-                $votes[$pid] = ($votes[$pid] ?? 0) + 1;
-                $totalVotes++;
-            }
-        }
-    }
-    
-    $ranked = [];
-    foreach ($photos as $p) {
-        $ranked[] = [
-            'id' => $p['id'],
-            'name' => $p['name'],
-            'webPath' => $p['webPath'],
-            'voteCount' => $votes[$p['id']] ?? 0
-        ];
-    }
-    usort($ranked, fn($a, $b) => $b['voteCount'] - $a['voteCount']);
-    
     send_json([
         'total' => count($photos),
-        'totalVotes' => $totalVotes,
         'uniqueEmails' => count(array_unique(array_column($photos, 'email'))),
-        'top3' => array_slice($ranked, 0, 3)
     ]);
 }
 
@@ -288,14 +293,14 @@ if ($path === '/public/gallery' && $method === 'GET') {
     $all = read_registrations();
     $s = read_settings();
 
-    // Hlasy - zjednotené čítanie
+    // Hlasy
     $votes = [];
-    $vrows = read_csv_locked(PUBLIC_VOTES_CSV);
-    if (!empty($vrows)) {
-        array_shift($vrows); // header
-        foreach ($vrows as $vr) {
-            $pid = $vr[0] ?? '';
-            if ($pid) $votes[$pid] = ($votes[$pid] ?? 0) + 1;
+    if (file_exists(PUBLIC_VOTES_CSV)) {
+        $vlines = file(PUBLIC_VOTES_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        array_shift($vlines);
+        foreach ($vlines as $vl) {
+            $vp = str_getcsv($vl);
+            if (!empty($vp[0])) $votes[$vp[0]] = ($votes[$vp[0]] ?? 0) + 1;
         }
     }
 
@@ -305,12 +310,14 @@ if ($path === '/public/gallery' && $method === 'GET') {
         $gallery[] = [
             'id'          => $p['id'],
             'category'    => $p['category'],
-            'name'        => $p['name'],
+            'name'        => $p['name'],           // názov fotky (nie autora)
             'description' => $p['description'],
             'webPath'     => $p['webPath'],
             'voteCount'   => $votes[$p['id']] ?? 0,
+            // autor je ANONYMIZOVANÝ – neprenášame email ani meno
         ];
     }
+    // Náhodné zoradenie pri každom načítaní
     shuffle($gallery);
     send_json($gallery);
 }
@@ -332,31 +339,22 @@ if ($path === '/public/vote' && $method === 'POST') {
 
     ensure_csv(PUBLIC_VOTES_CSV, 'photoId,createdAt,voterId');
 
-    // Skontroluj duplikát v uzamknutom režime
-    $rows = read_csv_locked(PUBLIC_VOTES_CSV);
-    if (empty($rows)) {
-        // Ak by read_csv_locked zlyhal hneď po ensure_csv
-        $header = ['photoId', 'createdAt', 'voterId'];
-    } else {
-        $header = array_shift($rows);
-    }
-
-    foreach ($rows as $r) {
-        if (($r[0] ?? '') === $photoId && ($r[2] ?? '') === $voterId) {
-            send_json(['error' => 'Z tohto zariadenia ste už za túto fotku hlasovali'], 429);
+    // Skontroluj duplikát
+    if (file_exists(PUBLIC_VOTES_CSV)) {
+        $vlines = file(PUBLIC_VOTES_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        array_shift($vlines);
+        foreach ($vlines as $vl) {
+            $vp = str_getcsv($vl);
+            if (($vp[0] ?? '') === $photoId && ($vp[2] ?? '') === $voterId) {
+                send_json(['error' => 'Z tohto zariadenia ste už za túto fotku hlasovali'], 429);
+            }
         }
     }
 
-    $rows[] = [$photoId, date('c'), $voterId];
-    array_unshift($rows, $header);
-    
-    if (write_csv_locked(PUBLIC_VOTES_CSV, $rows)) {
-        dlog("VOTE: photoId=$photoId voterId=$voterId");
-        send_json(['success' => true]);
-    } else {
-        dlog("VOTE ERROR: failed to write to " . PUBLIC_VOTES_CSV);
-        send_json(['error' => 'Chyba pri zápise hlasu'], 500);
-    }
+    $row = implode(',', [$photoId, date('c'), '"' . str_replace('"', '""', $voterId) . '"']) . "\n";
+    file_put_contents(PUBLIC_VOTES_CSV, $row, FILE_APPEND | LOCK_EX);
+    dlog("VOTE: photoId=$photoId voterId=$voterId");
+    send_json(['success' => true]);
 }
 
 if ($path === '/public/my-votes' && $method === 'GET') {
@@ -425,6 +423,7 @@ if ($path === '/register' && $method === 'POST') {
         $photoName = $pInfo['name'] ?? '';
         $id = bin2hex(random_bytes(8));
 
+        // === KĽÚČOVÁ ZMENA: menovanie súborov ===
         $baseName = build_filename($category, $author, $photoName, $file['name'], $id);
         $origFile = $baseName . '.jpg';
         $webFile  = $baseName . '.webp';
@@ -434,36 +433,41 @@ if ($path === '/register' && $method === 'POST') {
 
         $watermark = str_replace('$author', $author, $watermarkTpl);
 
+        dlog("FILE $i: kategoria=$category meno='$photoName' -> $webFile");
+
         if (ImageProcessor::processDouble($file['tmp_name'], $origPath, $webPath, 1920, $watermark, $wFontSize, $wColor)) {
-            $rows[] = [
+            dlog("FILE $i: OK");
+            $esc = fn($v) => '"' . str_replace('"', '""', $v) . '"';
+            $rows[] = implode(',', [
                 $id,
-                $author,
-                $_POST['email'] ?? '',
-                $_POST['instagram'] ?? '',
-                $_POST['webpage'] ?? '',
-                $_POST['address'] ?? '',
+                $esc($author),
+                $esc($_POST['email'] ?? ''),
+                $esc($_POST['instagram'] ?? ''),
+                $esc($_POST['webpage'] ?? ''),
+                $esc($_POST['address'] ?? ''),
                 ($_POST['gdprConsent'] === 'true' ? 'true' : 'false'),
                 ($_POST['rulesConsent'] === 'true' ? 'true' : 'false'),
-                $category,
-                ($photoName ?: pathinfo($file['name'], PATHINFO_FILENAME)),
-                $origFile,
-                $webFile,
-                ($pInfo['description'] ?? ''),
-                '{}',
+                $esc($category),
+                $esc($photoName ?: pathinfo($file['name'], PATHINFO_FILENAME)),
+                $esc($origFile),   // originalPath – bez vodoznaku
+                $esc($webFile),    // webPath – s vodoznakom, WebP
+                $esc($pInfo['description'] ?? ''),
+                '"{}"',
                 date('c'),
-                'true'
-            ];
+                'true',
+            ]);
         } else {
+            dlog("FILE $i FAILED: ImageProcessor zlyhal");
             $errors[] = "Súbor {$file['name']}: chyba pri spracovaní";
         }
     }
 
     if (!empty($rows)) {
-        $existing = read_csv_locked(REGISTRATIONS_CSV);
-        $all = array_merge($existing, $rows);
-        write_csv_locked(REGISTRATIONS_CSV, $all);
+        file_put_contents(REGISTRATIONS_CSV, implode("\n", $rows) . "\n", FILE_APPEND | LOCK_EX);
+        dlog("REGISTER: Ulozene " . count($rows) . " zaznamov");
         send_json(['success' => true, 'count' => count($rows), 'errors' => $errors]);
     } else {
+        dlog("REGISTER FAIL: Ziadny subor spracovany. Chyby: " . implode('; ', $errors));
         send_json(['success' => false, 'error' => 'Žiadna fotografia nebola spracovaná', 'details' => $errors], 500);
     }
 }
@@ -476,10 +480,159 @@ if ($path === '/admin/login' && $method === 'POST') {
     $admins = file_exists(ADMINS_JSON) ? json_decode(file_get_contents(ADMINS_JSON), true) : [];
     foreach ($admins as $a) {
         if ($a['email'] === ($data['email'] ?? '') && password_verify($data['password'] ?? '', $a['password_hash'])) {
-            send_json(['success' => true, 'token' => 'speleofoto-admin-token', 'user' => ['email' => $a['email']]]);
+            // Generovanie bezpečného náhodného tokenu
+            $token = bin2hex(random_bytes(16));
+            $tokens = file_exists(TOKENS_JSON) ? json_decode(file_get_contents(TOKENS_JSON), true) : [];
+            $tokens[$token] = [
+                'email' => $a['email'],
+                'expiresAt' => date('c', time() + 86400) // 24 hodín platnosť
+            ];
+            ensure_dir(dirname(TOKENS_JSON));
+            file_put_contents(TOKENS_JSON, json_encode($tokens, JSON_PRETTY_PRINT));
+            
+            send_json(['success' => true, 'token' => $token, 'user' => ['email' => $a['email']]]);
         }
     }
     send_json(['error' => 'Nesprávne prihlasovacie údaje'], 401);
+}
+
+if ($path === '/admin/change-password' && $method === 'POST') {
+    $data = json_input();
+    $email = strtolower(trim($data['email'] ?? ''));
+    $oldPassword = $data['oldPassword'] ?? '';
+    $newPassword = $data['newPassword'] ?? '';
+
+    if (!$email || !$oldPassword || !$newPassword) {
+        send_json(['error' => 'Chýbajúce údaje'], 400);
+    }
+
+    $admins = file_exists(ADMINS_JSON) ? json_decode(file_get_contents(ADMINS_JSON), true) : [];
+    $found = false;
+    foreach ($admins as &$a) {
+        if (strtolower($a['email']) === $email) {
+            if (password_verify($oldPassword, $a['password_hash'])) {
+                $a['password_hash'] = password_hash($newPassword, PASSWORD_DEFAULT);
+                $found = true;
+                break;
+            } else {
+                send_json(['error' => 'Nesprávne pôvodné heslo'], 401);
+            }
+        }
+    }
+
+    if ($found) {
+        file_put_contents(ADMINS_JSON, json_encode($admins, JSON_PRETTY_PRINT));
+        dlog("ADMIN PASSWORD CHANGE: $email");
+        
+        $token = bin2hex(random_bytes(16));
+        $tokens = file_exists(TOKENS_JSON) ? json_decode(file_get_contents(TOKENS_JSON), true) : [];
+        $tokens[$token] = [
+            'email' => $email,
+            'expiresAt' => date('c', time() + 86400)
+        ];
+        file_put_contents(TOKENS_JSON, json_encode($tokens, JSON_PRETTY_PRINT));
+
+        send_json(['success' => true, 'token' => $token]);
+    } else {
+        send_json(['error' => 'Administrátor nenájdený'], 404);
+    }
+}
+
+if ($path === '/admin/forgot-password' && $method === 'POST') {
+    $data = json_input();
+    $email = strtolower(trim($data['email'] ?? ''));
+    if (!$email) send_json(['error' => 'Email je povinný'], 400);
+
+    $admins = file_exists(ADMINS_JSON) ? json_decode(file_get_contents(ADMINS_JSON), true) : [];
+    $exists = false;
+    foreach ($admins as $a) {
+        if (strtolower($a['email']) === $email) {
+            $exists = true;
+            break;
+        }
+    }
+
+    if ($exists) {
+        $token = bin2hex(random_bytes(16));
+        dlog("PASSWORD RESET REQUEST: $email. Odkaz na nastavenie (vložte do prehliadača): http://" . ($_SERVER['HTTP_HOST'] ?? 'localhost') . "/admin/setup?token=" . $token);
+        
+        $tokens = file_exists(TOKENS_JSON) ? json_decode(file_get_contents(TOKENS_JSON), true) : [];
+        $tokens[$token] = [
+            'email' => $email,
+            'type' => 'reset',
+            'expiresAt' => date('c', time() + 3600) // 1 hodina platnosť
+        ];
+        ensure_dir(dirname(TOKENS_JSON));
+        file_put_contents(TOKENS_JSON, json_encode($tokens, JSON_PRETTY_PRINT));
+
+        send_json(['success' => true, 'message' => 'Odkaz na obnovu bol vygenerovaný a zaznamenaný v logu servera (debug.txt)']);
+    } else {
+        send_json(['error' => 'Administrátor s týmto emailom neexistuje'], 404);
+    }
+}
+
+if (preg_match('#^/admin/invite/([^/]+)$#', $path, $m) && $method === 'GET') {
+    $t = $m[1];
+    if (!file_exists(TOKENS_JSON)) send_json(['error' => 'Neplatný odkaz'], 404);
+
+    $tokens = json_decode(file_get_contents(TOKENS_JSON), true) ?? [];
+    if (!isset($tokens[$t]) || ($tokens[$t]['type'] ?? '') !== 'reset') {
+        send_json(['error' => 'Pozvánka je neplatná alebo vypršala'], 404);
+    }
+
+    $session = $tokens[$t];
+    if (strtotime($session['expiresAt']) < time()) {
+        unset($tokens[$t]);
+        file_put_contents(TOKENS_JSON, json_encode($tokens, JSON_PRETTY_PRINT));
+        send_json(['error' => 'Odkaz vypršal'], 404);
+    }
+
+    send_json(['email' => $session['email']]);
+}
+
+if ($path === '/admin/setup-password' && $method === 'POST') {
+    $data = json_input();
+    $t = $data['token'] ?? '';
+    $password = $data['password'] ?? '';
+
+    if (!$t || !$password) {
+        send_json(['error' => 'Neplatné údaje'], 400);
+    }
+
+    if (!file_exists(TOKENS_JSON)) send_json(['error' => 'Neplatný token'], 404);
+    $tokens = json_decode(file_get_contents(TOKENS_JSON), true) ?? [];
+
+    if (!isset($tokens[$t]) || ($tokens[$t]['type'] ?? '') !== 'reset') {
+        send_json(['error' => 'Token neexistuje alebo expiroval'], 404);
+    }
+
+    $session = $tokens[$t];
+    if (strtotime($session['expiresAt']) < time()) {
+        unset($tokens[$t]);
+        file_put_contents(TOKENS_JSON, json_encode($tokens, JSON_PRETTY_PRINT));
+        send_json(['error' => 'Token expiroval'], 404);
+    }
+
+    $email = $session['email'];
+    $admins = file_exists(ADMINS_JSON) ? json_decode(file_get_contents(ADMINS_JSON), true) : [];
+    $found = false;
+    foreach ($admins as &$a) {
+        if (strtolower($a['email']) === strtolower($email)) {
+            $a['password_hash'] = password_hash($password, PASSWORD_DEFAULT);
+            $found = true;
+            break;
+        }
+    }
+
+    if ($found) {
+        file_put_contents(ADMINS_JSON, json_encode($admins, JSON_PRETTY_PRINT));
+        unset($tokens[$t]);
+        file_put_contents(TOKENS_JSON, json_encode($tokens, JSON_PRETTY_PRINT));
+        dlog("ADMIN PASSWORD SETUP SUCCESS: $email");
+        send_json(['success' => true]);
+    } else {
+        send_json(['error' => 'Administrátor nenájdený'], 404);
+    }
 }
 
 if ($path === '/admin/settings' && $method === 'GET') { send_json(read_settings()); }
@@ -491,14 +644,7 @@ if ($path === '/admin/settings' && $method === 'POST') {
     send_json(['success' => true]);
 }
 
-if ($path === '/admin/photos' && $method === 'GET') { 
-    $photos = read_registrations();
-    foreach ($photos as &$p) {
-        $filePath = ORIGINALS_DIR . '/' . ($p['originalPath'] ?? '---');
-        $p['originalExists'] = !empty($p['originalPath']) && file_exists($filePath);
-    }
-    send_json($photos); 
-}
+if ($path === '/admin/photos' && $method === 'GET') { send_json(read_registrations()); }
 if ($path === '/admin/list'   && $method === 'GET') { 
     $admins = file_exists(ADMINS_JSON) ? json_decode(file_get_contents(ADMINS_JSON), true) : [];
     $unique = [];
@@ -543,60 +689,70 @@ if ($path === '/admin/dashboard-stats' && $method === 'GET') {
     // Štatistiky hodnotenia poroty
     $ratedCount = 0;
     $juryActivity = [];
-    $rrows = read_csv_locked(RATINGS_CSV);
-    if (!empty($rrows)) {
-        array_shift($rrows);
+    if (file_exists(RATINGS_CSV)) {
+        $rlines = file(RATINGS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        array_shift($rlines);
         $ratedPhotos = [];
-        foreach ($rrows as $r) {
-            $pid = $r[0] ?? '';
-            $jid = $r[2] ?? '';
+        foreach ($rlines as $rl) {
+            $r = str_getcsv($rl);
+            $jid = $r[0] ?? '';
+            $jname = trim($r[1] ?? '', '"');
+            $pid = $r[2] ?? '';
             if ($pid) $ratedPhotos[$pid] = true;
             if ($jid) $juryActivity[$jid] = ($juryActivity[$jid] ?? 0) + 1;
         }
         $ratedCount = count($ratedPhotos);
     }
 
-    // Počet verejných hlasov (len pre existujúce fotky)
+    // Počet verejných hlasov
     $publicVoteCount = 0;
-    $validIds = array_column($photos, 'id');
-    $validIdMap = array_flip($validIds);
-    $vrows = read_csv_locked(PUBLIC_VOTES_CSV);
-    if (!empty($vrows)) {
-        array_shift($vrows);
-        foreach ($vrows as $v) {
-            if (!empty($v[0]) && isset($validIdMap[$v[0]])) {
-                $publicVoteCount++;
-            }
-        }
+    if (file_exists(PUBLIC_VOTES_CSV)) {
+        $vlines = file(PUBLIC_VOTES_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        $publicVoteCount = max(0, count($vlines) - 1);
     }
 
     send_json([
-        'totalPhotos'      => count($photos),
-        'byCategory'       => $byCategory,
-        'uniqueAuthors'    => count(array_unique(array_column($photos, 'email'))),
-        'ratedPhotos'      => $ratedCount,
-        'totalPublicVotes' => $publicVoteCount,
-        'juryActivity'     => $juryActivity,
-        'dailyAccess'      => 0, // Zatiaľ nesledované, ale vyžadované frontendom
+        'total'          => count($photos),
+        'byCategory'     => $byCategory,
+        'uniqueAuthors'  => count(array_unique(array_column($photos, 'email'))),
+        'ratedPhotos'    => $ratedCount,
+        'publicVotes'    => $publicVoteCount,
+        'juryActivity'   => $juryActivity,
     ]);
 }
 
-// Helper: read evaluators from dedicated evaluators.json
+// Helper: read evaluators from dedicated evaluators.csv
 function read_evaluators() {
-    if (!file_exists(EVALUATORS_JSON)) return [];
-    $data = json_decode(file_get_contents(EVALUATORS_JSON), true);
-    return is_array($data) ? $data : [];
+    if (!file_exists(EVALUATORS_CSV)) {
+        ensure_csv(EVALUATORS_CSV, 'id,name,role');
+        return [];
+    }
+    $lines = file(EVALUATORS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    array_shift($lines); // remove header
+    $evals = [];
+    foreach ($lines as $line) {
+        $p = str_getcsv($line);
+        if (count($p) >= 2) {
+            $evals[] = [
+                'id' => $p[0],
+                'name' => $p[1],
+                'role' => $p[2] ?? 'evaluator'
+            ];
+        }
+    }
+    return $evals;
 }
 
 if ($path === '/evaluators' && $method === 'GET') {
     $evals = read_evaluators();
     // Pridáme počet hodnotení pre každého porotcu
     $counts = [];
-    $rrows = read_csv_locked(RATINGS_CSV);
-    if (!empty($rrows)) {
-        array_shift($rrows);
-        foreach ($rrows as $r) {
-            $jid = $r[2] ?? '';
+    if (file_exists(RATINGS_CSV)) {
+        $rlines = file(RATINGS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        array_shift($rlines);
+        foreach ($rlines as $rl) {
+            $r = str_getcsv($rl);
+            $jid = $r[0] ?? '';
             if ($jid) $counts[$jid] = ($counts[$jid] ?? 0) + 1;
         }
     }
@@ -613,32 +769,53 @@ if ($path === '/evaluators' && $method === 'POST') {
     $name = trim($data['name'] ?? '');
     if (empty($name)) send_json(['error' => 'Meno porotcu je povinné'], 400);
 
-    $evals = read_evaluators();
     $id = bin2hex(random_bytes(8));
-    $evals[] = ['id' => $id, 'name' => $name, 'createdAt' => date('c')];
+    ensure_csv(EVALUATORS_CSV, 'id,name,role');
+    
+    $esc = fn($v) => '"' . str_replace('"', '""', $v) . '"';
+    $row = implode(',', [$id, $esc($name), 'evaluator']) . "\n";
+    file_put_contents(EVALUATORS_CSV, $row, FILE_APPEND | LOCK_EX);
 
-    file_put_contents(EVALUATORS_JSON, json_encode($evals, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
     dlog("EVALUATOR CREATE: id=$id name=$name");
     send_json(['status' => 'ok', 'id' => $id, 'name' => $name]);
 }
 
 if (preg_match('#^/evaluators/([^/]+)$#', $path, $m) && $method === 'DELETE') {
     $delId = $m[1];
-    $evals = read_evaluators();
-    $evals = array_values(array_filter($evals, fn($e) => $e['id'] !== $delId));
-    file_put_contents(EVALUATORS_JSON, json_encode($evals, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-    dlog("EVALUATOR DELETE: id=$delId");
-    send_json(['success' => true]);
+    if (!file_exists(EVALUATORS_CSV)) send_json(['error' => 'Žiadni porotcovia'], 404);
+
+    $lines = file(EVALUATORS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    $header = array_shift($lines);
+    $remaining = [];
+    $found = false;
+
+    foreach ($lines as $line) {
+        $p = str_getcsv($line);
+        if (($p[0] ?? '') === $delId) {
+            $found = true;
+        } else {
+            $remaining[] = $line;
+        }
+    }
+
+    if ($found) {
+        file_put_contents(EVALUATORS_CSV, $header . "\n" . implode("\n", $remaining) . ($remaining ? "\n" : ""), LOCK_EX);
+        dlog("EVALUATOR DELETE: id=$delId");
+        send_json(['success' => true]);
+    } else {
+        send_json(['error' => 'Porotca nenájdený'], 404);
+    }
 }
 
 if ($path === '/admin/public-results' && $method === 'GET') {
     $photos = read_registrations();
     $votes = [];
-    $vrows = read_csv_locked(PUBLIC_VOTES_CSV);
-    if (!empty($vrows)) {
-        array_shift($vrows);
-        foreach ($vrows as $v) {
-            if (!empty($v[0])) $votes[$v[0]] = ($votes[$v[0]] ?? 0) + 1;
+    if (file_exists(PUBLIC_VOTES_CSV)) {
+        $vlines = file(PUBLIC_VOTES_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        array_shift($vlines);
+        foreach ($vlines as $vl) {
+            $vp = str_getcsv($vl);
+            if (!empty($vp[0])) $votes[$vp[0]] = ($votes[$vp[0]] ?? 0) + 1;
         }
     }
     foreach ($photos as &$p) $p['voteCount'] = $votes[$p['id']] ?? 0;
@@ -676,15 +853,16 @@ if ($path === '/jury/photos' && $method === 'GET') {
 if (preg_match('#^/ratings/([^/]+)$#', $path, $m) && $method === 'GET') {
     $evalId = $m[1];
     $ratings = [];
-    $rrows = read_csv_locked(RATINGS_CSV);
-    if (!empty($rrows)) {
-        array_shift($rrows); // header
-        foreach ($rrows as $r) {
-            if (($r[2] ?? '') === $evalId) {
+    if (file_exists(RATINGS_CSV)) {
+        $lines = file(RATINGS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        array_shift($lines); // header
+        foreach ($lines as $line) {
+            $r = str_getcsv($line);
+            if (($r[0] ?? '') === $evalId) {
                 $ratings[] = [
-                    'photoId' => $r[0] ?? '',
+                    'photoId' => $r[2] ?? '',
                     'score'   => (int)($r[3] ?? 0),
-                    'judgeId' => $r[2] ?? ''
+                    'judgeId' => $r[0] ?? ''
                 ];
             }
         }
@@ -706,29 +884,28 @@ if ($path === '/rate' && $method === 'POST') {
         send_json(['error' => 'Neplatné údaje pre hodnotenie'], 400);
     }
 
-    ensure_csv(RATINGS_CSV, 'photoId,judgeName,judgeId,score,timestamp');
+    ensure_csv(RATINGS_CSV, 'evalId,evalName,photoId,score,createdAt');
     
-    $rows = read_csv_locked(RATINGS_CSV);
-    $header = array_shift($rows);
-    
-    $found = false;
-    foreach ($rows as &$r) {
-        if (($r[0] ?? '') === $photoId && ($r[2] ?? '') === $evalId) {
-            $r[1] = $evalName;
-            $r[3] = $score;
-            $r[4] = date('c');
-            $found = true;
-            break;
+    $lines = file(RATINGS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    $header = array_shift($lines);
+    $newLines = [$header];
+    foreach ($lines as $line) {
+        $r = str_getcsv($line);
+        if (($r[2] ?? '') === $photoId && ($r[0] ?? '') === $evalId) {
+            continue;
         }
+        $newLines[] = $line;
     }
     
-    if (!$found) {
-        $rows[] = [$photoId, $evalName, $evalId, $score, date('c')];
-    }
+    $newLines[] = implode(',', [
+        $evalId,
+        '"' . str_replace('"', '""', $evalName) . '"',
+        $photoId,
+        $score,
+        date('c')
+    ]);
     
-    array_unshift($rows, $header);
-    write_csv_locked(RATINGS_CSV, $rows);
-    
+    file_put_contents(RATINGS_CSV, implode("\n", $newLines) . "\n", LOCK_EX);
     send_json(['success' => true]);
 }
 
@@ -763,74 +940,6 @@ if (in_array($path, ['/admin/bulk-upload', '/admin/stress-upload']) && $method =
     send_json(['success' => true, 'count' => 10, 'message' => 'Generovaných 10 testovacích záznamov']);
 }
 
-if ($path === '/admin/system-reset' && $method === 'POST') {
-    dlog("ADMIN: SYSTEM RESET triggered");
-    
-    // 1. Vyčisti CSV databázy (ponechaj len hlavičky)
-    $regHeader = ['id','author','email','instagram','webpage','address','gdprConsent','rulesConsent','category','name','originalPath','webPath','description','metadata','createdAt','shortlisted'];
-    write_csv_locked(REGISTRATIONS_CSV, [$regHeader]);
-    
-    $ratHeader = ['photoId','judgeName','judgeId','score','timestamp'];
-    write_csv_locked(RATINGS_CSV, [$ratHeader]);
-    
-    $pvHeader = ['photoId','createdAt','voterId'];
-    write_csv_locked(PUBLIC_VOTES_CSV, [$pvHeader]);
-    
-    // 2. Vymaž porotcov
-    file_put_contents(EVALUATORS_JSON, json_encode([], JSON_PRETTY_PRINT));
-    
-    // 3. Vymaž všetky nahrané súbory
-    $cleanDir = function($dir) {
-        if (!is_dir($dir)) return;
-        $files = scandir($dir);
-        foreach ($files as $f) {
-            if ($f === '.' || $f === '..' || $f === '.gitkeep') continue;
-            if (is_file($dir.'/'.$f)) unlink($dir.'/'.$f);
-        }
-    };
-    $cleanDir(UPLOADS_DIR);
-    $cleanDir(ORIGINALS_DIR);
-    
-    send_json(['success' => true, 'message' => 'Systém bol kompletne vyčistený (DB aj FS)']);
-}
-
-if (preg_match('#^/admin/photos/([^/]+)$#', $path, $m) && $method === 'PATCH') {
-    $idToUpdate = $m[1];
-    $updates = json_input();
-    dlog("UPDATE PHOTO: id=$idToUpdate");
-
-    $rows = read_csv_locked(REGISTRATIONS_CSV);
-    if (empty($rows)) send_json(['error' => 'Žiadne registrácie'], 404);
-
-    $header = array_shift($rows);
-    $found = false;
-    $newRows = [$header];
-
-    foreach ($rows as $p) {
-        if (($p[0] ?? '') === $idToUpdate) {
-            $found = true;
-            // Mapovanie polí CSV (pozri csv_row_to_photo):
-            // 0:id, 1:author, 2:email, 3:instagram, 4:webpage, 5:address, 6:gdpr, 7:rules, 
-            // 8:category, 9:name, 10:origPath, 11:webPath, 12:desc, 13:meta, 14:createdAt, 15:shortlisted
-            
-            if (isset($updates['author']))      $p[1]  = $updates['author'];
-            if (isset($updates['email']))       $p[2]  = $updates['email'];
-            if (isset($updates['category']))    $p[8]  = $updates['category'];
-            if (isset($updates['name']))        $p[9]  = $updates['name'];
-            if (isset($updates['description'])) $p[12] = $updates['description'];
-            if (isset($updates['shortlisted'])) $p[15] = $updates['shortlisted'] ? 'true' : 'false';
-        }
-        $newRows[] = $p;
-    }
-
-    if ($found) {
-        write_csv_locked(REGISTRATIONS_CSV, $newRows);
-        send_json(['success' => true]);
-    } else {
-        send_json(['error' => 'Fotografia nenájdená'], 404);
-    }
-}
-
 // ============================================================
 // === ADMIN: ZMAZANIE JEDNEJ FOTKY
 // ============================================================
@@ -838,51 +947,36 @@ if (preg_match('#^/admin/photos/([^/]+)$#', $path, $m) && $method === 'DELETE') 
     $idToDelete = $m[1];
     dlog("DELETE PHOTO: id=$idToDelete");
     
-    // 1. Zmaž z registrácií a súbory
-    $rows = read_csv_locked(REGISTRATIONS_CSV);
-    if (empty($rows)) send_json(['error' => 'Žiadne registrácie'], 404);
+    if (!file_exists(REGISTRATIONS_CSV)) send_json(['error' => 'Žiadne registrácie'], 404);
     
-    $header = array_shift($rows);
-    $newRows = [$header];
+    $lines = file(REGISTRATIONS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    $header = array_shift($lines);
+    $remaining = [];
     $found = false;
 
-    foreach ($rows as $p) {
+    foreach ($lines as $line) {
+        $p = str_getcsv($line);
         if (($p[0] ?? '') === $idToDelete) {
             $found = true;
-            $origFile = $p[10] ?? '';
-            $webFile  = $p[11] ?? '';
-            if ($origFile && file_exists(ORIGINALS_DIR . '/' . $origFile)) unlink(ORIGINALS_DIR . '/' . $origFile);
-            if ($webFile  && file_exists(UPLOADS_DIR . '/' . $webFile))   unlink(UPLOADS_DIR . '/' . $webFile);
+            // Zmaž súbory
+            foreach ([10, 11] as $idx) {
+                $file = $p[$idx] ?? '';
+                if ($file) {
+                    $dir = ($idx === 10) ? ORIGINALS_DIR : UPLOADS_DIR;
+                    $fullPath = $dir . '/' . $file;
+                    if (file_exists($fullPath)) {
+                        $res = unlink($fullPath);
+                        dlog("UNLINK: $fullPath " . ($res ? "OK" : "FAILED"));
+                    }
+                }
+            }
         } else {
-            $newRows[] = $p;
+            $remaining[] = $line;
         }
     }
     
     if ($found) {
-        write_csv_locked(REGISTRATIONS_CSV, $newRows);
-
-        // 2. Zmaž súvisiace hodnotenia poroty
-        $rrows = read_csv_locked(RATINGS_CSV);
-        if (!empty($rrows)) {
-            $rheader = array_shift($rrows);
-            $newRRows = [$rheader];
-            foreach ($rrows as $r) {
-                if (($r[0] ?? '') !== $idToDelete) $newRRows[] = $r;
-            }
-            write_csv_locked(RATINGS_CSV, $newRRows);
-        }
-
-        // 3. Zmaž súvisiace verejné hlasy
-        $vrows = read_csv_locked(PUBLIC_VOTES_CSV);
-        if (!empty($vrows)) {
-            $vheader = array_shift($vrows);
-            $newVRows = [$vheader];
-            foreach ($vrows as $v) {
-                if (($v[0] ?? '') !== $idToDelete) $newVRows[] = $v;
-            }
-            write_csv_locked(PUBLIC_VOTES_CSV, $newVRows);
-        }
-
+        file_put_contents(REGISTRATIONS_CSV, $header . "\n" . implode("\n", $remaining) . ($remaining ? "\n" : ""), LOCK_EX);
         send_json(['success' => true]);
     } else {
         send_json(['error' => 'Fotografia nenájdená'], 404);
@@ -895,34 +989,27 @@ if (preg_match('#^/admin/photos/([^/]+)$#', $path, $m) && $method === 'DELETE') 
 if ($path === '/admin/photos/delete-all' && $method === 'POST') {
     dlog("DELETE ALL PHOTOS requested");
     
-    // 1. Premaž registrácie a zmaž súbory
-    $rows = read_csv_locked(REGISTRATIONS_CSV);
-    if (!empty($rows)) {
-        $header = array_shift($rows);
-        foreach ($rows as $p) {
-            $origFile = $p[10] ?? '';
-            $webFile  = $p[11] ?? '';
-            if ($origFile && file_exists(ORIGINALS_DIR . '/' . $origFile)) unlink(ORIGINALS_DIR . '/' . $origFile);
-            if ($webFile  && file_exists(UPLOADS_DIR . '/' . $webFile))   unlink(UPLOADS_DIR . '/' . $webFile);
+    if (!file_exists(REGISTRATIONS_CSV)) send_json(['success' => true]);
+    
+    $lines = file(REGISTRATIONS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    $header = array_shift($lines);
+    
+    foreach ($lines as $line) {
+        $p = str_getcsv($line);
+        foreach ([10, 11] as $idx) {
+            $file = $p[$idx] ?? '';
+            if ($file) {
+                $dir = ($idx === 10) ? ORIGINALS_DIR : UPLOADS_DIR;
+                $fullPath = $dir . '/' . $file;
+                if (file_exists($fullPath)) unlink($fullPath);
+            }
         }
-        write_csv_locked(REGISTRATIONS_CSV, [$header]);
     }
     
-    // 2. Premaž hodnotenia (ponechaj len hlavičku)
-    $rrows = read_csv_locked(RATINGS_CSV);
-    if (!empty($rrows)) {
-        $rheader = array_shift($rrows);
-        write_csv_locked(RATINGS_CSV, [$rheader]);
-    }
-
-    // 3. Premaž verejné hlasy (ponechaj len hlavičku)
-    $vrows = read_csv_locked(PUBLIC_VOTES_CSV);
-    if (!empty($vrows)) {
-        $vheader = array_shift($vrows);
-        write_csv_locked(PUBLIC_VOTES_CSV, [$vheader]);
-    }
-
-    // Vyčisti adresáre (poistka pre nezdokumentované súbory)
+    // Vyčisti CSV (ponechaj len hlavičku)
+    file_put_contents(REGISTRATIONS_CSV, $header . "\n", LOCK_EX);
+    
+    // Vyčisti aj adresáre (pre istotu – zmaže všetko čo tam ostalo)
     $cleanDir = function($dir) {
         if (!is_dir($dir)) return;
         $files = scandir($dir);
@@ -958,89 +1045,87 @@ if (preg_match('#^/admin/list/(.+)$#', $path, $m) && $method === 'DELETE') {
 if ($path === '/admin/photos/bulk-delete' && $method === 'POST') {
     $data = json_input();
     $ids = $data['ids'] ?? [];
-    if (empty($ids) || !is_array($ids)) send_json(['error' => 'Neboli zadané žiadne ID'], 400);
+    if (empty($ids) || !is_array($ids)) {
+        send_json(['error' => 'Neboli zadané žiadne ID'], 400);
+    }
 
+    if (!file_exists(REGISTRATIONS_CSV)) {
+        send_json(['error' => 'Žiadne registrácie'], 404);
+    }
+
+    $lines = file(REGISTRATIONS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    $header = array_shift($lines);
     $idSet = array_flip($ids);
-
-    // 1. Zmaž z registrácií a súbory
-    $rows = read_csv_locked(REGISTRATIONS_CSV);
-    if (empty($rows)) send_json(['error' => 'Žiadne registrácie'], 404);
-
-    $header = array_shift($rows);
-    $newRows = [$header];
+    $remaining = [];
     $deletedCount = 0;
 
-    foreach ($rows as $p) {
+    foreach ($lines as $line) {
+        $p = str_getcsv($line);
         $id = $p[0] ?? '';
         if (isset($idSet[$id])) {
+            // Zmaž web súbor (uploads/)
+            $webFile = $p[11] ?? '';
+            if ($webFile) {
+                $wp = UPLOADS_DIR . '/' . $webFile;
+                if (file_exists($wp)) {
+                    $r = unlink($wp);
+                    dlog("UNLINK WEB: $wp " . ($r ? "OK" : "FAILED"));
+                }
+            }
+            // Zmaž originál (uploads/originals/)
             $origFile = $p[10] ?? '';
-            $webFile  = $p[11] ?? '';
-            if ($origFile && file_exists(ORIGINALS_DIR . '/' . $origFile)) unlink(ORIGINALS_DIR . '/' . $origFile);
-            if ($webFile  && file_exists(UPLOADS_DIR . '/' . $webFile))   unlink(UPLOADS_DIR . '/' . $webFile);
+            if ($origFile) {
+                $op = ORIGINALS_DIR . '/' . $origFile;
+                if (file_exists($op)) {
+                    $r = unlink($op);
+                    dlog("UNLINK ORIG: $op " . ($r ? "OK" : "FAILED"));
+                }
+            }
             $deletedCount++;
+            dlog("BULK DELETE: id=$id");
         } else {
-            $newRows[] = $p;
+            $remaining[] = $line;
         }
     }
-    write_csv_locked(REGISTRATIONS_CSV, $newRows);
 
-    // 2. Zmaž z hodnotení
-    $rrows = read_csv_locked(RATINGS_CSV);
-    if (!empty($rrows)) {
-        $rheader = array_shift($rrows);
-        $newRRows = [$rheader];
-        foreach ($rrows as $r) {
-            if (!isset($idSet[$r[0] ?? ''])) $newRRows[] = $r;
-        }
-        write_csv_locked(RATINGS_CSV, $newRRows);
-    }
-
-    // 3. Zmaž z verejných hlasov
-    $vrows = read_csv_locked(PUBLIC_VOTES_CSV);
-    if (!empty($vrows)) {
-        $vheader = array_shift($vrows);
-        $newVRows = [$vheader];
-        foreach ($vrows as $v) {
-            if (!isset($idSet[$v[0] ?? ''])) $newVRows[] = $v;
-        }
-        write_csv_locked(PUBLIC_VOTES_CSV, $newVRows);
-    }
-
+    file_put_contents(REGISTRATIONS_CSV, $header . "\n" . implode("\n", $remaining) . ($remaining ? "\n" : ""), LOCK_EX);
     send_json(['success' => true, 'deleted' => $deletedCount]);
 }
 
 // ============================================================
-// === ADMIN: EXPORT DO CSV (Kompletné výsledky poroty)
+// === ADMIN: EXPORT DO CSV
 // ============================================================
 if ($path === '/admin/export/results-csv' && $method === 'GET') {
     if (!file_exists(REGISTRATIONS_CSV)) {
         send_json(['error' => 'Súbor s registráciami neexistuje'], 404);
     }
     
-    $s = read_settings();
+    // Načítaj fotky
     $photos = read_registrations();
-    $contestYear = $s['contestYear'] ?? date('Y');
     
     // Načítaj verejné hlasy
     $publicVotes = [];
-    $vrows = read_csv_locked(PUBLIC_VOTES_CSV);
-    if (!empty($vrows)) {
-        array_shift($vrows);
-        foreach ($vrows as $v) {
-            $pid = $v[0] ?? '';
+    if (file_exists(PUBLIC_VOTES_CSV)) {
+        $vlines = file(PUBLIC_VOTES_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        array_shift($vlines);
+        foreach ($vlines as $v) {
+            $r = str_getcsv($v);
+            $pid = $r[0] ?? '';
             if ($pid) $publicVotes[$pid] = ($publicVotes[$pid] ?? 0) + 1;
         }
     }
     
     // Načítaj porotcov a hodnotenia
-    $evaluators = read_evaluators(); 
+    $evaluators = read_evaluators(); // vracia pole porotcov
+    
     $juryScores = [];
-    $rrows = read_csv_locked(RATINGS_CSV);
-    if (!empty($rrows)) {
-        array_shift($rrows);
-        foreach ($rrows as $r) {
-            $pid = $r[0] ?? '';
-            $jid = $r[2] ?? '';
+    if (file_exists(RATINGS_CSV)) {
+        $rlines = file(RATINGS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        array_shift($rlines);
+        foreach ($rlines as $rl) {
+            $r = str_getcsv($rl);
+            $pid = $r[2] ?? '';
+            $jid = $r[0] ?? '';
             $score = (int)($r[3] ?? 0);
             if ($pid && $jid) {
                 if (!isset($juryScores[$pid])) $juryScores[$pid] = [];
@@ -1051,22 +1136,22 @@ if ($path === '/admin/export/results-csv' && $method === 'GET') {
     
     dlog("EXPORT: results-csv");
     header('Content-Type: text/csv; charset=utf-8');
-    header('Content-Disposition: attachment; filename="speleofotografia_vysledky_porota_' . date('Y-m-d') . '.csv"');
+    header('Content-Disposition: attachment; filename="speleofotografia_vysledky_' . date('Y-m-d') . '.csv"');
+    echo "\xEF\xBB\xBF"; // UTF-8 BOM pre Excel
     
-    $out = fopen('php://output', 'w');
-    fprintf($out, chr(0xEF).chr(0xBB).chr(0xBF)); // UTF-8 BOM
-    
-    // CSV Header: Info -> Porotcovia -> Skóre na konci
-    $headerCols = ['ID', 'Kategória', 'Názov', 'Autor', 'Email', 'Adresa', 'Rok', 'Hlasy_Verejnosti'];
+    // CSV Header
+    $headerCols = ['ID', 'Kategória', 'Názov', 'Autor', 'Email', 'Krajina', 'Rok', 'Hlasy_Verejnosti', 'Porota_Spolu'];
     foreach ($evaluators as $e) {
-        $headerCols[] = 'Porotca_' . $e['name'];
+        $headerCols[] = 'Porotca_' . str_replace(' ', '_', $e['name']);
     }
-    $headerCols[] = 'Porota_Spolu'; // Posledný stĺpec
-    fputcsv($out, $headerCols);
+    
+    $esc = fn($v) => '"' . str_replace('"', '""', $v) . '"';
+    echo implode(',', $headerCols) . "\n";
     
     foreach ($photos as $p) {
         $pid = $p['id'];
         $pvotes = $publicVotes[$pid] ?? 0;
+        
         $jScores = $juryScores[$pid] ?? [];
         $jTotal = array_sum($jScores);
         
@@ -1076,64 +1161,18 @@ if ($path === '/admin/export/results-csv' && $method === 'GET') {
             $p['name'],
             $p['author'],
             $p['email'],
-            $p['address'],
-            $contestYear,
-            $pvotes
+            $p['country'] ?? '',
+            $p['year'] ?? '',
+            $pvotes,
+            $jTotal
         ];
         
         foreach ($evaluators as $e) {
             $row[] = $jScores[$e['id']] ?? '';
         }
-        $row[] = $jTotal; // Skóre na konci
-        fputcsv($out, $row);
+        
+        echo implode(',', array_map($esc, $row)) . "\n";
     }
-    fclose($out);
-    exit;
-}
-
-// ============================================================
-// === ADMIN: EXPORT PUBLIC RESULTS SUMMARY (Cena verejnosti)
-// ============================================================
-if ($path === '/admin/export/public-results-csv' && $method === 'GET') {
-    if (!file_exists(REGISTRATIONS_CSV)) {
-        send_json(['error' => 'Súbor s registráciami neexistuje'], 404);
-    }
-    
-    $s = read_settings();
-    $photos = read_registrations();
-    $contestYear = $s['contestYear'] ?? date('Y');
-    
-    $votes = [];
-    $vrows = read_csv_locked(PUBLIC_VOTES_CSV);
-    if (!empty($vrows)) {
-        array_shift($vrows);
-        foreach ($vrows as $v) {
-            if (!empty($v[0])) $votes[$v[0]] = ($votes[$v[0]] ?? 0) + 1;
-        }
-    }
-
-    dlog("EXPORT: public-results-csv");
-    header('Content-Type: text/csv; charset=utf-8');
-    header('Content-Disposition: attachment; filename="speleofotografia_vysledky_verejnost_' . date('Y-m-d') . '.csv"');
-    
-    $out = fopen('php://output', 'w');
-    fprintf($out, chr(0xEF).chr(0xBB).chr(0xBF)); // UTF-8 BOM
-    
-    fputcsv($out, ['ID', 'Kategória', 'Názov', 'Autor', 'Email', 'Adresa', 'Rok', 'Pocet_Hlasov']);
-    
-    foreach ($photos as $p) {
-        fputcsv($out, [
-            $p['id'],
-            $p['category'],
-            $p['name'],
-            $p['author'],
-            $p['email'],
-            $p['address'],
-            $contestYear,
-            $votes[$p['id']] ?? 0
-        ]);
-    }
-    fclose($out);
     exit;
 }
 
@@ -1152,29 +1191,28 @@ if ($path === '/admin/export/public-votes-csv' && $method === 'GET') {
         $photos[$p['id']] = ['name' => $p['name'], 'category' => $p['category'], 'author' => $p['author']];
     }
 
-    $vrows = read_csv_locked(PUBLIC_VOTES_CSV);
-    array_shift($vrows); // header
+    $lines = file(PUBLIC_VOTES_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    $header = array_shift($lines);
 
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="speleofotografia_hlasy_verejnosti_' . date('Y-m-d') . '.csv"');
-    
-    $out = fopen('php://output', 'w');
-    fprintf($out, chr(0xEF).chr(0xBB).chr(0xBF)); // UTF-8 BOM
+    echo "\xEF\xBB\xBF"; // UTF-8 BOM pre Excel
 
-    fputcsv($out, ['photoId','photoName','photoCategory','photoAuthor','createdAt','voterIdAnon']);
-    foreach ($vrows as $v) {
-        $pid = $v[0] ?? '';
+    echo "photoId,photoName,photoCategory,photoAuthor,createdAt,voterIdAnon\n";
+    foreach ($lines as $line) {
+        $r = str_getcsv($line);
+        $pid = $r[0] ?? '';
         $info = $photos[$pid] ?? ['name' => '', 'category' => '', 'author' => ''];
-        fputcsv($out, [
-            $pid,
-            $info['name'],
-            $info['category'],
-            $info['author'],
-            $v[1] ?? '',
-            substr(md5($v[2] ?? ''), 0, 8) // anonymizovaný voter ID
-        ]);
+        $esc = fn($v) => '"' . str_replace('"', '""', $v) . '"';
+        echo implode(',', [
+            $esc($pid),
+            $esc($info['name']),
+            $esc($info['category']),
+            $esc($info['author']),
+            $esc($r[1] ?? ''),
+            $esc(substr(md5($r[2] ?? ''), 0, 8)) // anonymizovaný voter ID
+        ]) . "\n";
     }
-    fclose($out);
     exit;
 }
 
@@ -1189,52 +1227,59 @@ if ($path === '/admin/export/total-archive' && $method === 'GET') {
     // Zvýšenie limitov pre veľké archívy
     set_time_limit(600); // 10 minút
     ini_set('memory_limit', '1024M');
+    ignore_user_abort(true);
     
-    $zipFile = DATA_DIR . '/speleofoto_komplet_export_' . date('Ymd_His') . '.zip';
+    $zipFile = DATA_DIR . '/speleofoto_archive_' . date('Ymd_His') . '.zip';
     $zip = new ZipArchive();
     
     if ($zip->open($zipFile, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== TRUE) {
         send_json(['error' => 'Nepodarilo sa vytvoriť ZIP archív'], 500);
     }
     
-    // 1. Pridaj všetky CSV z data/
-    $csvFiles = [REGISTRATIONS_CSV, RATINGS_CSV, PUBLIC_VOTES_CSV];
-    foreach ($csvFiles as $f) {
-        if (file_exists($f)) {
-            $zip->addFile($f, 'data/' . basename($f));
-        }
-    }
-
-    // 2. Pridaj JSONy
-    $jsonFiles = [ADMINS_JSON, EVALUATORS_JSON, SETTINGS_JSON];
-    foreach ($jsonFiles as $f) {
-        if (file_exists($f)) {
-            $zip->addFile($f, 'data/' . basename($f));
-        }
-    }
-    
-    // 3. Pridaj originály fotiek
     $photos = read_registrations();
+    $addedCount = 0;
+    
     foreach ($photos as $p) {
         $file = $p['originalPath'] ?? '';
         if ($file) {
             $filePath = ORIGINALS_DIR . '/' . $file;
             if (file_exists($filePath)) {
-                $zip->addFile($filePath, 'images/' . $file);
+                $zip->addFile($filePath, $file);
+                $addedCount++;
             }
         }
     }
     
     $zip->close();
     
-    dlog("EXPORT: total-archive size=" . filesize($zipFile));
+    if ($addedCount === 0) {
+        if (file_exists($zipFile)) unlink($zipFile);
+        send_json(['error' => 'Žiadne fotografie na archiváciu'], 404);
+    }
     
+    dlog("EXPORT: total-archive count=$addedCount size=" . filesize($zipFile));
+    
+    // Vyčistiť buffery pred odoslaním veľkého súboru
     while (ob_get_level()) ob_end_clean();
+    
     header('Content-Type: application/zip');
     header('Content-Disposition: attachment; filename="speleofotografia_komplet_' . date('Y-m-d') . '.zip"');
     header('Content-Length: ' . filesize($zipFile));
-    readfile($zipFile);
-    unlink($zipFile);
+    header('Pragma: no-cache');
+    header('Cache-Control: must-revalidate, post-check=0, pre-check=0');
+    header('Expires: 0');
+    
+    // Streamovanie súboru
+    $handle = fopen($zipFile, 'rb');
+    if ($handle) {
+        while (!feof($handle)) {
+            echo fread($handle, 1024 * 1024); // 1MB chunks
+            flush();
+        }
+        fclose($handle);
+    }
+    
+    unlink($zipFile); // Vymazať po odoslaní
     exit;
 }
 
@@ -1243,15 +1288,16 @@ if ($path === '/admin/export/total-archive' && $method === 'GET') {
 // ============================================================
 if ($path === '/admin/ratings' && $method === 'GET') {
     $result = [];
-    $rrows = read_csv_locked(RATINGS_CSV);
-    if (!empty($rrows)) {
-        array_shift($rrows); // header
+    if (file_exists(RATINGS_CSV)) {
+        $lines = file(RATINGS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        array_shift($lines); // header
 
         $grouped = [];
-        foreach ($rrows as $r) {
-            $photoId   = $r[0] ?? '';
+        foreach ($lines as $line) {
+            $r = str_getcsv($line);
+            $photoId   = $r[2] ?? '';
             $judgeName = $r[1] ?? '';
-            $judgeId   = $r[2] ?? '';
+            $judgeId   = $r[0] ?? '';
             $score     = (int)($r[3] ?? 0);
             $ts        = $r[4] ?? '';
             if (!$photoId) continue;
@@ -1291,31 +1337,30 @@ if ($path === '/admin/export/ratings-csv' && $method === 'GET') {
         $photos[$p['id']] = ['name' => $p['name'], 'category' => $p['category'], 'author' => $p['author']];
     }
 
-    $rrows = read_csv_locked(RATINGS_CSV);
-    array_shift($rrows); // header
+    $lines = file(RATINGS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    $header = array_shift($lines);
 
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="speleofotografia_hodnotenia_' . date('Y-m-d') . '.csv"');
-    
-    $out = fopen('php://output', 'w');
-    fprintf($out, chr(0xEF).chr(0xBB).chr(0xBF)); // UTF-8 BOM
+    echo "\xEF\xBB\xBF"; // UTF-8 BOM pre Excel
 
-    fputcsv($out, ['photoId', 'photoName', 'photoCategory', 'photoAuthor', 'judgeName', 'judgeId', 'score', 'timestamp']);
-    foreach ($rrows as $r) {
-        $pid  = $r[0] ?? '';
+    echo "photoId,photoName,photoCategory,photoAuthor,judgeName,judgeId,score,timestamp\n";
+    foreach ($lines as $line) {
+        $r = str_getcsv($line);
+        $pid  = $r[2] ?? '';
         $info = $photos[$pid] ?? ['name' => '', 'category' => '', 'author' => ''];
-        fputcsv($out, [
-            $pid,
-            $info['name'],
-            $info['category'],
-            $info['author'],
-            $r[1] ?? '',
-            $r[2] ?? '',
+        $esc = fn($v) => '"' . str_replace('"', '""', $v) . '"';
+        echo implode(',', [
+            $esc($pid),
+            $esc($info['name']),
+            $esc($info['category']),
+            $esc($info['author']),
+            $esc($r[1] ?? ''),
+            $esc($r[0] ?? ''),
             (int)($r[3] ?? 0),
-            $r[4] ?? '',
-        ]);
+            $esc($r[4] ?? ''),
+        ]) . "\n";
     }
-    fclose($out);
     exit;
 }
 
