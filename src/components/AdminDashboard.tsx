@@ -120,7 +120,7 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
     if (!confirm(lang === "sk" ? `Naozaj chcete zmazať ${selectedPhotos.length} vybraných fotografií?` : `Do you really want to delete ${selectedPhotos.length} selected photos?`)) return;
 
     try {
-      const res = await fetch("/api/admin/photos/bulk-delete", {
+      const res = await fetchWithAuth("/api/admin/photos/bulk-delete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids: selectedPhotos })
@@ -138,7 +138,7 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
     if (!confirm(lang === "sk" ? "VAROVANIE: Naozaj chcete zmazať ÚPLNE VŠETKY fotografie v súťaži?" : "WARNING: Do you really want to delete ALL photos in the contest?")) return;
 
     try {
-      const res = await fetch("/api/admin/photos/delete-all", { method: "POST" });
+      const res = await fetchWithAuth("/api/admin/photos/delete-all", { method: "POST" });
       if (res.ok) {
         setSelectedPhotos([]);
         fetchData();
@@ -173,6 +173,15 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   
+  const fetchWithAuth = (url: string, options: RequestInit = {}) => {
+    const token = localStorage.getItem("speleofoto_token");
+    const headers = {
+      ...options.headers,
+      ...(token ? { "Authorization": `Bearer ${token}` } : {})
+    };
+    return fetch(url, { ...options, headers });
+  };
+  
   
   
   const filteredPhotos = useMemo(() => {
@@ -195,8 +204,9 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
 
   useEffect(() => {
     // Initial data fetch if already authorized (e.g. from session)
-    if (isAuthorized) {
-      fetchData();
+    const token = localStorage.getItem("speleofoto_token");
+    if (token) {
+      setIsAuthorized(true);
     }
   }, []);
 
@@ -211,7 +221,7 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
 
   const fetchPublicResults = async () => {
     try {
-      const res = await fetch("/api/admin/public-results");
+      const res = await fetchWithAuth("/api/admin/public-results");
       if (res.ok) {
         const data = await res.json();
         setPublicResults(Array.isArray(data) ? data : []);
@@ -223,7 +233,7 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
 
   const fetchAdminList = async () => {
     try {
-      const res = await fetch("/api/admin/list");
+      const res = await fetchWithAuth("/api/admin/list");
       if (res.ok) setAdminList(await res.json());
     } catch (e) {
       console.error(e);
@@ -233,7 +243,7 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
   const deleteAdmin = async (email: string) => {
     if (!confirm(lang === "sk" ? `Naozaj chcete zmazať administrátora ${email}?` : `Do you really want to delete admin ${email}?`)) return;
     try {
-      const res = await fetch(`/api/admin/list/${email}`, {
+      const res = await fetchWithAuth(`/api/admin/list/${email}`, {
         method: "DELETE"
       });
       if (res.ok) {
@@ -251,7 +261,7 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
     if (!inviteEmail) return;
     setInviteStatus("sending");
     try {
-      const res = await fetch("/api/admin/invite", {
+      const res = await fetchWithAuth("/api/admin/invite", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: inviteEmail })
@@ -322,6 +332,9 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
           setMustChangePassword(true);
         } else {
           setIsAuthorized(true);
+          if (data.token) {
+            localStorage.setItem("speleofoto_token", data.token);
+          }
         }
         setAuthError("");
       } else {
@@ -342,7 +355,7 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
       return;
     }
     try {
-      const res = await fetch("/api/admin/change-password", {
+      const res = await fetchWithAuth("/api/admin/change-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, oldPassword: password, newPassword })
@@ -368,7 +381,7 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
     }
     setResetStatus("sending");
     try {
-      const res = await fetch("/api/admin/forgot-password", {
+      const res = await fetchWithAuth("/api/admin/forgot-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email })
@@ -389,7 +402,7 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
     setStressStatus("uploading");
     setStressResults(null);
     try {
-      const res = await fetch("/api/admin/stress-upload", { method: "POST" });
+      const res = await fetchWithAuth("/api/admin/stress-upload", { method: "POST" });
       const data = await res.json();
       if (res.ok) {
         setStressStatus("success");
@@ -412,7 +425,7 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
     if (!confirm(msg)) return;
 
     try {
-      const res = await fetch("/api/admin/system-reset", { method: "POST" });
+      const res = await fetchWithAuth("/api/admin/system-reset", { method: "POST" });
       const data = await res.json();
       if (res.ok) {
         alert(data.message);
@@ -490,10 +503,10 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
     try {
       const [statsRes, photosRes, evalsRes, dashStatsRes, ratingsRes] = await Promise.all([
         fetch("/api/stats"),
-        fetch("/api/admin/photos"),
-        fetch("/api/evaluators"),
-        fetch("/api/admin/dashboard-stats"),
-        fetch("/api/admin/ratings"),
+        fetchWithAuth("/api/admin/photos"),
+        fetchWithAuth("/api/evaluators"),
+        fetchWithAuth("/api/admin/dashboard-stats"),
+        fetchWithAuth("/api/admin/ratings"),
       ]);
       
       const statsData = await (statsRes.ok ? statsRes.json() : Promise.resolve({}));
@@ -522,7 +535,7 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
 
   const fetchSettings = async () => {
     try {
-      const res = await fetch("/api/admin/settings");
+      const res = await fetchWithAuth("/api/admin/settings");
       if (res.ok) {
         setSettings(await res.json());
       }
@@ -534,7 +547,7 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
   const saveSettings = async () => {
     setSaveStatus("saving");
     try {
-      const res = await fetch("/api/admin/settings", {
+      const res = await fetchWithAuth("/api/admin/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(settings)
@@ -558,7 +571,7 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
     formData.append("logo", file);
 
     try {
-      const res = await fetch("/api/admin/upload-logo", {
+      const res = await fetchWithAuth("/api/admin/upload-logo", {
         method: "POST",
         body: formData
       });
@@ -575,7 +588,7 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
 
   const createEvaluator = async () => {
     if (!newEvalName) return;
-    const res = await fetch("/api/evaluators", {
+    const res = await fetchWithAuth("/api/evaluators", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: newEvalName })
@@ -596,7 +609,7 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
   const deletePhoto = async (id: string) => {
     if (!confirm(lang === "sk" ? "Naozaj chcete zmazať túto fotografiu?" : "Are you sure you want to delete this photo?")) return;
     try {
-      const res = await fetch(`/api/admin/photos/${id}`, { method: "DELETE" });
+      const res = await fetchWithAuth(`/api/admin/photos/${id}`, { method: "DELETE" });
       if (res.ok) fetchData();
     } catch (e) {
       console.error(e);
@@ -606,7 +619,7 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
   const updatePhoto = async (id: string, updates: Partial<Photo>) => {
     setIsUpdating(true);
     try {
-      const res = await fetch(`/api/admin/photos/${id}`, {
+      const res = await fetchWithAuth(`/api/admin/photos/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updates)
@@ -626,7 +639,7 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
     if (!commModal.email || !commSubject || !commMessage) return;
     setCommStatus("sending");
     try {
-      const res = await fetch("/api/admin/communicate", {
+      const res = await fetchWithAuth("/api/admin/communicate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1387,69 +1400,74 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
               </div>
             </div>
 
-            <div className="space-y-6 mt-12">
-              <div className="flex flex-col md:flex-row gap-6 p-8 bg-paper border border-border items-center justify-between rounded-sm">
-                <div className="space-y-2 text-center md:text-left">
-                  <h4 className="text-sm font-bold uppercase tracking-[3px] text-ink">Tabuľka výsledkov (.CSV)</h4>
-                  <p className="text-[11px] text-muted max-w-md">
-                    Základný prehľad s bodmi a umiestnením pre rýchly import do Excelu.
-                  </p>
+            <div className="mt-12">
+              <h3 className="text-[11px] font-bold uppercase tracking-[2px] text-muted border-b border-border pb-2 mb-6">
+                {lang === "sk" ? "Exporty a výstupy" : "Exports & Downloads"}
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Výsledky Poroty */}
+                <div className="p-5 bg-white border border-border flex flex-col justify-between space-y-4 shadow-sm">
+                  <div className="space-y-1">
+                    <h4 className="text-[12px] font-bold uppercase tracking-wider text-accent">Tabuľka výsledkov (.CSV)</h4>
+                    <p className="text-[10px] text-muted leading-relaxed">
+                      Základný prehľad s bodmi a umiestnením pre rýchly import do Excelu.
+                    </p>
+                  </div>
+                  <button 
+                    onClick={exportResults}
+                    className="w-full flex items-center justify-center gap-2 py-3 bg-accent text-white text-[10px] font-bold uppercase tracking-widest hover:opacity-90 transition-all"
+                  >
+                    <Download size={14} /> Download CSV
+                  </button>
                 </div>
-                <button 
-                  onClick={exportResults}
-                  className="flex items-center gap-3 px-10 py-4 bg-white border border-border text-ink text-[11px] font-bold uppercase tracking-widest hover:bg-paper transition-colors"
-                >
-                  <Download size={16} />
-                  Download CSV
-                </button>
-              </div>
 
-              <div className="flex flex-col md:flex-row gap-6 p-8 bg-paper border border-accent/30 items-center justify-between rounded-sm">
-                <div className="space-y-2 text-center md:text-left">
-                  <h4 className="text-sm font-bold uppercase tracking-[3px] text-accent">Hlasy verejnosti (.CSV)</h4>
-                  <p className="text-[11px] text-muted max-w-md">
-                    Surové dáta verejného hlasovania – každý hlas na samostatnom riadku s časovou pečiatkou a anonymným ID hlasujúceho.
-                  </p>
+                {/* Hlasy Verejnosti */}
+                <div className="p-5 bg-white border border-border flex flex-col justify-between space-y-4 shadow-sm">
+                  <div className="space-y-1">
+                    <h4 className="text-[12px] font-bold uppercase tracking-wider text-accent">Hlasy verejnosti (.CSV)</h4>
+                    <p className="text-[10px] text-muted leading-relaxed">
+                      Surové dáta verejného hlasovania – každý hlas s časovou pečiatkou a anonymným ID.
+                    </p>
+                  </div>
+                  <button 
+                    onClick={exportPublicVotes}
+                    className="w-full flex items-center justify-center gap-2 py-3 bg-accent text-white text-[10px] font-bold uppercase tracking-widest hover:opacity-90 transition-all"
+                  >
+                    <Download size={14} /> Download Votes
+                  </button>
                 </div>
-                <button 
-                  onClick={exportPublicVotes}
-                  className="flex items-center gap-3 px-10 py-4 bg-accent text-white text-[11px] font-bold uppercase tracking-widest hover:opacity-90 transition-opacity"
-                >
-                  <Download size={16} />
-                  Download Public Votes
-                </button>
-              </div>
 
-              <div className="flex flex-col md:flex-row gap-6 p-8 bg-paper border border-border items-center justify-between rounded-sm">
-                <div className="space-y-2 text-center md:text-left">
-                  <h4 className="text-sm font-bold uppercase tracking-[3px] text-ink">Hodnotenia poroty (.CSV)</h4>
-                  <p className="text-[11px] text-muted max-w-md">
-                    Kompletné hodnotenia od všetkých porotcov – každé bodovanie na samostatnom riadku s menom porotcu a časovou pečiatkou.
-                  </p>
+                {/* Hodnotenia Poroty */}
+                <div className="p-5 bg-white border border-border flex flex-col justify-between space-y-4 shadow-sm">
+                  <div className="space-y-1">
+                    <h4 className="text-[12px] font-bold uppercase tracking-wider text-accent">Hodnotenia poroty (.CSV)</h4>
+                    <p className="text-[10px] text-muted leading-relaxed">
+                      Kompletné hodnotenia od všetkých porotcov – každý záznam s menom a časom.
+                    </p>
+                  </div>
+                  <button 
+                    onClick={exportRatings}
+                    className="w-full flex items-center justify-center gap-2 py-3 bg-accent text-white text-[10px] font-bold uppercase tracking-widest hover:opacity-90 transition-all"
+                  >
+                    <Download size={14} /> Download Ratings
+                  </button>
                 </div>
-                <button 
-                  onClick={exportRatings}
-                  className="flex items-center gap-3 px-10 py-4 bg-white border border-border text-ink text-[11px] font-bold uppercase tracking-widest hover:bg-paper transition-colors"
-                >
-                  <Download size={16} />
-                  Download Ratings CSV
-                </button>
-              </div>
 
-              <div className="flex flex-col md:flex-row gap-6 p-8 border-2 border-dashed border-border items-center justify-between rounded-sm">
-                <div className="space-y-2 text-center md:text-left">
-                  <h4 className="text-sm font-bold uppercase tracking-[3px] text-ink">Kompletný archív (.ZIP)</h4>
-                  <p className="text-[11px] text-muted max-w-md">
-                    Všetky súťažné fotografie roztriedené do priečinkov + podrobné tabuľky s hlasovaním poroty.
-                  </p>
+                {/* Kompletný Archív */}
+                <div className="p-5 bg-paper border border-border border-dashed flex flex-col justify-between space-y-4">
+                  <div className="space-y-1">
+                    <h4 className="text-[12px] font-bold uppercase tracking-wider text-accent">Kompletný archív (.ZIP)</h4>
+                    <p className="text-[10px] text-muted leading-relaxed">
+                      Všetky fotografie roztriedené do priečinkov + kompletné databázy CSV.
+                    </p>
+                  </div>
+                  <button 
+                    onClick={downloadTotalArchive}
+                    className="w-full flex items-center justify-center gap-2 py-3 bg-accent text-white text-[10px] font-bold uppercase tracking-widest hover:opacity-90 transition-all shadow-sm"
+                  >
+                    <FileText size={14} /> Download ZIP
+                  </button>
                 </div>
-                <button 
-                  onClick={downloadTotalArchive}
-                  className="flex items-center gap-3 px-10 py-4 bg-ink text-white text-[11px] font-bold uppercase tracking-widest hover:opacity-90 transition-opacity"
-                >
-                  <Download size={16} />
-                  Download ZIP
-                </button>
               </div>
             </div>
           </div>

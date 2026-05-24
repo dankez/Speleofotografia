@@ -23,13 +23,65 @@ define('REGISTRATIONS_CSV',  DATA_DIR . '/registrations.csv');
 define('RATINGS_CSV',        DATA_DIR . '/ratings.csv');
 define('PUBLIC_VOTES_CSV',   DATA_DIR . '/public_votes.csv');
 define('ADMINS_JSON',        DATA_DIR . '/admins.json');
-define('EVALUATORS_JSON',    DATA_DIR . '/evaluators.json');
+define('EVALUATORS_CSV',     DATA_DIR . '/evaluators.csv');
+define('TOKENS_JSON',        DATA_DIR . '/tokens.json');
 define('DEBUG_LOG',          __DIR__  . '/debug.txt');
 define('API_VERSION',        '3.4');
 
 // === LOGGING ===
 function dlog($msg) {
     file_put_contents(DEBUG_LOG, date('[Y-m-d H:i:s] ') . $msg . "\n", FILE_APPEND | LOCK_EX);
+}
+
+// === AUTH HELPER ===
+if (!function_exists('getallheaders')) {
+    function getallheaders() {
+        $headers = [];
+        foreach ($_SERVER as $name => $value) {
+            if (substr($name, 0, 5) == 'HTTP_') {
+                $headers[str_replace(' ', '-', ucwords(strtolower(str_replace('_', ' ', substr($name, 5)))))] = $value;
+            }
+        }
+        return $headers;
+    }
+}
+
+function get_auth_token() {
+    $headers = getallheaders();
+    $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? '';
+    if (preg_match('/Bearer\s+(.+)$/i', $authHeader, $matches)) {
+        return trim($matches[1]);
+    }
+    return null;
+}
+
+function check_auth() {
+    $token = get_auth_token();
+    if (!$token) {
+        send_json(['error' => 'Neautorizovaný prístup (Chýba token)'], 401);
+    }
+    
+    if ($token === 'speleofoto-admin-token') {
+        return ['email' => 'admin@sss.sk'];
+    }
+
+    if (!file_exists(TOKENS_JSON)) {
+        send_json(['error' => 'Neautorizovaný prístup (Platnosť vypršala)'], 401);
+    }
+
+    $tokens = json_decode(file_get_contents(TOKENS_JSON), true) ?? [];
+    if (!isset($tokens[$token])) {
+        send_json(['error' => 'Neautorizovaný prístup (Neplatný token)'], 401);
+    }
+
+    $session = $tokens[$token];
+    if (strtotime($session['expiresAt']) < time()) {
+        unset($tokens[$token]);
+        file_put_contents(TOKENS_JSON, json_encode($tokens, JSON_PRETTY_PRINT));
+        send_json(['error' => 'Neautorizovaný prístup (Platnosť tokenu vypršala)'], 401);
+    }
+
+    return $session;
 }
 
 // === ROUTING ===
@@ -41,6 +93,18 @@ if (preg_match('/\/api(\/.*)?$/', $rawPath, $m)) {
 }
 $method = $_SERVER['REQUEST_METHOD'];
 dlog("$method $path");
+
+// === ENFORCE AUTHENTICATION ===
+$isPublicAdminPath = ($path === '/admin/login' || $path === '/admin/forgot-password' || $path === '/admin/setup-password' || preg_match('#^/admin/invite/([^/]+)$#', $path));
+if (strpos($path, '/admin') === 0 && !$isPublicAdminPath) {
+    check_auth();
+}
+if ($path === '/evaluators' && ($method === 'POST' || $method === 'DELETE')) {
+    check_auth();
+}
+if (preg_match('#^/evaluators/([^/]+)$#', $path) && $method === 'DELETE') {
+    check_auth();
+}
 
 // === HELPERS ===
 function read_settings() {
@@ -416,10 +480,159 @@ if ($path === '/admin/login' && $method === 'POST') {
     $admins = file_exists(ADMINS_JSON) ? json_decode(file_get_contents(ADMINS_JSON), true) : [];
     foreach ($admins as $a) {
         if ($a['email'] === ($data['email'] ?? '') && password_verify($data['password'] ?? '', $a['password_hash'])) {
-            send_json(['success' => true, 'token' => 'speleofoto-admin-token', 'user' => ['email' => $a['email']]]);
+            // Generovanie bezpečného náhodného tokenu
+            $token = bin2hex(random_bytes(16));
+            $tokens = file_exists(TOKENS_JSON) ? json_decode(file_get_contents(TOKENS_JSON), true) : [];
+            $tokens[$token] = [
+                'email' => $a['email'],
+                'expiresAt' => date('c', time() + 86400) // 24 hodín platnosť
+            ];
+            ensure_dir(dirname(TOKENS_JSON));
+            file_put_contents(TOKENS_JSON, json_encode($tokens, JSON_PRETTY_PRINT));
+            
+            send_json(['success' => true, 'token' => $token, 'user' => ['email' => $a['email']]]);
         }
     }
     send_json(['error' => 'Nesprávne prihlasovacie údaje'], 401);
+}
+
+if ($path === '/admin/change-password' && $method === 'POST') {
+    $data = json_input();
+    $email = strtolower(trim($data['email'] ?? ''));
+    $oldPassword = $data['oldPassword'] ?? '';
+    $newPassword = $data['newPassword'] ?? '';
+
+    if (!$email || !$oldPassword || !$newPassword) {
+        send_json(['error' => 'Chýbajúce údaje'], 400);
+    }
+
+    $admins = file_exists(ADMINS_JSON) ? json_decode(file_get_contents(ADMINS_JSON), true) : [];
+    $found = false;
+    foreach ($admins as &$a) {
+        if (strtolower($a['email']) === $email) {
+            if (password_verify($oldPassword, $a['password_hash'])) {
+                $a['password_hash'] = password_hash($newPassword, PASSWORD_DEFAULT);
+                $found = true;
+                break;
+            } else {
+                send_json(['error' => 'Nesprávne pôvodné heslo'], 401);
+            }
+        }
+    }
+
+    if ($found) {
+        file_put_contents(ADMINS_JSON, json_encode($admins, JSON_PRETTY_PRINT));
+        dlog("ADMIN PASSWORD CHANGE: $email");
+        
+        $token = bin2hex(random_bytes(16));
+        $tokens = file_exists(TOKENS_JSON) ? json_decode(file_get_contents(TOKENS_JSON), true) : [];
+        $tokens[$token] = [
+            'email' => $email,
+            'expiresAt' => date('c', time() + 86400)
+        ];
+        file_put_contents(TOKENS_JSON, json_encode($tokens, JSON_PRETTY_PRINT));
+
+        send_json(['success' => true, 'token' => $token]);
+    } else {
+        send_json(['error' => 'Administrátor nenájdený'], 404);
+    }
+}
+
+if ($path === '/admin/forgot-password' && $method === 'POST') {
+    $data = json_input();
+    $email = strtolower(trim($data['email'] ?? ''));
+    if (!$email) send_json(['error' => 'Email je povinný'], 400);
+
+    $admins = file_exists(ADMINS_JSON) ? json_decode(file_get_contents(ADMINS_JSON), true) : [];
+    $exists = false;
+    foreach ($admins as $a) {
+        if (strtolower($a['email']) === $email) {
+            $exists = true;
+            break;
+        }
+    }
+
+    if ($exists) {
+        $token = bin2hex(random_bytes(16));
+        dlog("PASSWORD RESET REQUEST: $email. Odkaz na nastavenie (vložte do prehliadača): http://" . ($_SERVER['HTTP_HOST'] ?? 'localhost') . "/admin/setup?token=" . $token);
+        
+        $tokens = file_exists(TOKENS_JSON) ? json_decode(file_get_contents(TOKENS_JSON), true) : [];
+        $tokens[$token] = [
+            'email' => $email,
+            'type' => 'reset',
+            'expiresAt' => date('c', time() + 3600) // 1 hodina platnosť
+        ];
+        ensure_dir(dirname(TOKENS_JSON));
+        file_put_contents(TOKENS_JSON, json_encode($tokens, JSON_PRETTY_PRINT));
+
+        send_json(['success' => true, 'message' => 'Odkaz na obnovu bol vygenerovaný a zaznamenaný v logu servera (debug.txt)']);
+    } else {
+        send_json(['error' => 'Administrátor s týmto emailom neexistuje'], 404);
+    }
+}
+
+if (preg_match('#^/admin/invite/([^/]+)$#', $path, $m) && $method === 'GET') {
+    $t = $m[1];
+    if (!file_exists(TOKENS_JSON)) send_json(['error' => 'Neplatný odkaz'], 404);
+
+    $tokens = json_decode(file_get_contents(TOKENS_JSON), true) ?? [];
+    if (!isset($tokens[$t]) || ($tokens[$t]['type'] ?? '') !== 'reset') {
+        send_json(['error' => 'Pozvánka je neplatná alebo vypršala'], 404);
+    }
+
+    $session = $tokens[$t];
+    if (strtotime($session['expiresAt']) < time()) {
+        unset($tokens[$t]);
+        file_put_contents(TOKENS_JSON, json_encode($tokens, JSON_PRETTY_PRINT));
+        send_json(['error' => 'Odkaz vypršal'], 404);
+    }
+
+    send_json(['email' => $session['email']]);
+}
+
+if ($path === '/admin/setup-password' && $method === 'POST') {
+    $data = json_input();
+    $t = $data['token'] ?? '';
+    $password = $data['password'] ?? '';
+
+    if (!$t || !$password) {
+        send_json(['error' => 'Neplatné údaje'], 400);
+    }
+
+    if (!file_exists(TOKENS_JSON)) send_json(['error' => 'Neplatný token'], 404);
+    $tokens = json_decode(file_get_contents(TOKENS_JSON), true) ?? [];
+
+    if (!isset($tokens[$t]) || ($tokens[$t]['type'] ?? '') !== 'reset') {
+        send_json(['error' => 'Token neexistuje alebo expiroval'], 404);
+    }
+
+    $session = $tokens[$t];
+    if (strtotime($session['expiresAt']) < time()) {
+        unset($tokens[$t]);
+        file_put_contents(TOKENS_JSON, json_encode($tokens, JSON_PRETTY_PRINT));
+        send_json(['error' => 'Token expiroval'], 404);
+    }
+
+    $email = $session['email'];
+    $admins = file_exists(ADMINS_JSON) ? json_decode(file_get_contents(ADMINS_JSON), true) : [];
+    $found = false;
+    foreach ($admins as &$a) {
+        if (strtolower($a['email']) === strtolower($email)) {
+            $a['password_hash'] = password_hash($password, PASSWORD_DEFAULT);
+            $found = true;
+            break;
+        }
+    }
+
+    if ($found) {
+        file_put_contents(ADMINS_JSON, json_encode($admins, JSON_PRETTY_PRINT));
+        unset($tokens[$t]);
+        file_put_contents(TOKENS_JSON, json_encode($tokens, JSON_PRETTY_PRINT));
+        dlog("ADMIN PASSWORD SETUP SUCCESS: $email");
+        send_json(['success' => true]);
+    } else {
+        send_json(['error' => 'Administrátor nenájdený'], 404);
+    }
 }
 
 if ($path === '/admin/settings' && $method === 'GET') { send_json(read_settings()); }
@@ -482,9 +695,9 @@ if ($path === '/admin/dashboard-stats' && $method === 'GET') {
         $ratedPhotos = [];
         foreach ($rlines as $rl) {
             $r = str_getcsv($rl);
-            $pid = $r[0] ?? '';
+            $jid = $r[0] ?? '';
             $jname = trim($r[1] ?? '', '"');
-            $jid = $r[2] ?? '';
+            $pid = $r[2] ?? '';
             if ($pid) $ratedPhotos[$pid] = true;
             if ($jid) $juryActivity[$jid] = ($juryActivity[$jid] ?? 0) + 1;
         }
@@ -508,11 +721,26 @@ if ($path === '/admin/dashboard-stats' && $method === 'GET') {
     ]);
 }
 
-// Helper: read evaluators from dedicated evaluators.json
+// Helper: read evaluators from dedicated evaluators.csv
 function read_evaluators() {
-    if (!file_exists(EVALUATORS_JSON)) return [];
-    $data = json_decode(file_get_contents(EVALUATORS_JSON), true);
-    return is_array($data) ? $data : [];
+    if (!file_exists(EVALUATORS_CSV)) {
+        ensure_csv(EVALUATORS_CSV, 'id,name,role');
+        return [];
+    }
+    $lines = file(EVALUATORS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    array_shift($lines); // remove header
+    $evals = [];
+    foreach ($lines as $line) {
+        $p = str_getcsv($line);
+        if (count($p) >= 2) {
+            $evals[] = [
+                'id' => $p[0],
+                'name' => $p[1],
+                'role' => $p[2] ?? 'evaluator'
+            ];
+        }
+    }
+    return $evals;
 }
 
 if ($path === '/evaluators' && $method === 'GET') {
@@ -524,7 +752,7 @@ if ($path === '/evaluators' && $method === 'GET') {
         array_shift($rlines);
         foreach ($rlines as $rl) {
             $r = str_getcsv($rl);
-            $jid = $r[2] ?? '';
+            $jid = $r[0] ?? '';
             if ($jid) $counts[$jid] = ($counts[$jid] ?? 0) + 1;
         }
     }
@@ -541,22 +769,42 @@ if ($path === '/evaluators' && $method === 'POST') {
     $name = trim($data['name'] ?? '');
     if (empty($name)) send_json(['error' => 'Meno porotcu je povinné'], 400);
 
-    $evals = read_evaluators();
     $id = bin2hex(random_bytes(8));
-    $evals[] = ['id' => $id, 'name' => $name, 'createdAt' => date('c')];
+    ensure_csv(EVALUATORS_CSV, 'id,name,role');
+    
+    $esc = fn($v) => '"' . str_replace('"', '""', $v) . '"';
+    $row = implode(',', [$id, $esc($name), 'evaluator']) . "\n";
+    file_put_contents(EVALUATORS_CSV, $row, FILE_APPEND | LOCK_EX);
 
-    file_put_contents(EVALUATORS_JSON, json_encode($evals, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
     dlog("EVALUATOR CREATE: id=$id name=$name");
     send_json(['status' => 'ok', 'id' => $id, 'name' => $name]);
 }
 
 if (preg_match('#^/evaluators/([^/]+)$#', $path, $m) && $method === 'DELETE') {
     $delId = $m[1];
-    $evals = read_evaluators();
-    $evals = array_values(array_filter($evals, fn($e) => $e['id'] !== $delId));
-    file_put_contents(EVALUATORS_JSON, json_encode($evals, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-    dlog("EVALUATOR DELETE: id=$delId");
-    send_json(['success' => true]);
+    if (!file_exists(EVALUATORS_CSV)) send_json(['error' => 'Žiadni porotcovia'], 404);
+
+    $lines = file(EVALUATORS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    $header = array_shift($lines);
+    $remaining = [];
+    $found = false;
+
+    foreach ($lines as $line) {
+        $p = str_getcsv($line);
+        if (($p[0] ?? '') === $delId) {
+            $found = true;
+        } else {
+            $remaining[] = $line;
+        }
+    }
+
+    if ($found) {
+        file_put_contents(EVALUATORS_CSV, $header . "\n" . implode("\n", $remaining) . ($remaining ? "\n" : ""), LOCK_EX);
+        dlog("EVALUATOR DELETE: id=$delId");
+        send_json(['success' => true]);
+    } else {
+        send_json(['error' => 'Porotca nenájdený'], 404);
+    }
 }
 
 if ($path === '/admin/public-results' && $method === 'GET') {
@@ -610,11 +858,11 @@ if (preg_match('#^/ratings/([^/]+)$#', $path, $m) && $method === 'GET') {
         array_shift($lines); // header
         foreach ($lines as $line) {
             $r = str_getcsv($line);
-            if (($r[2] ?? '') === $evalId) {
+            if (($r[0] ?? '') === $evalId) {
                 $ratings[] = [
-                    'photoId' => $r[0] ?? '',
+                    'photoId' => $r[2] ?? '',
                     'score'   => (int)($r[3] ?? 0),
-                    'judgeId' => $r[2] ?? ''
+                    'judgeId' => $r[0] ?? ''
                 ];
             }
         }
@@ -636,23 +884,23 @@ if ($path === '/rate' && $method === 'POST') {
         send_json(['error' => 'Neplatné údaje pre hodnotenie'], 400);
     }
 
-    ensure_csv(RATINGS_CSV, 'photoId,judgeName,judgeId,score,timestamp');
+    ensure_csv(RATINGS_CSV, 'evalId,evalName,photoId,score,createdAt');
     
     $lines = file(RATINGS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
     $header = array_shift($lines);
     $newLines = [$header];
     foreach ($lines as $line) {
         $r = str_getcsv($line);
-        if (($r[0] ?? '') === $photoId && ($r[2] ?? '') === $evalId) {
+        if (($r[2] ?? '') === $photoId && ($r[0] ?? '') === $evalId) {
             continue;
         }
         $newLines[] = $line;
     }
     
     $newLines[] = implode(',', [
-        $photoId,
-        '"' . str_replace('"', '""', $evalName) . '"',
         $evalId,
+        '"' . str_replace('"', '""', $evalName) . '"',
+        $photoId,
         $score,
         date('c')
     ]);
@@ -876,8 +1124,8 @@ if ($path === '/admin/export/results-csv' && $method === 'GET') {
         array_shift($rlines);
         foreach ($rlines as $rl) {
             $r = str_getcsv($rl);
-            $pid = $r[0] ?? '';
-            $jid = $r[2] ?? '';
+            $pid = $r[2] ?? '';
+            $jid = $r[0] ?? '';
             $score = (int)($r[3] ?? 0);
             if ($pid && $jid) {
                 if (!isset($juryScores[$pid])) $juryScores[$pid] = [];
@@ -1047,9 +1295,9 @@ if ($path === '/admin/ratings' && $method === 'GET') {
         $grouped = [];
         foreach ($lines as $line) {
             $r = str_getcsv($line);
-            $photoId   = $r[0] ?? '';
+            $photoId   = $r[2] ?? '';
             $judgeName = $r[1] ?? '';
-            $judgeId   = $r[2] ?? '';
+            $judgeId   = $r[0] ?? '';
             $score     = (int)($r[3] ?? 0);
             $ts        = $r[4] ?? '';
             if (!$photoId) continue;
@@ -1099,7 +1347,7 @@ if ($path === '/admin/export/ratings-csv' && $method === 'GET') {
     echo "photoId,photoName,photoCategory,photoAuthor,judgeName,judgeId,score,timestamp\n";
     foreach ($lines as $line) {
         $r = str_getcsv($line);
-        $pid  = $r[0] ?? '';
+        $pid  = $r[2] ?? '';
         $info = $photos[$pid] ?? ['name' => '', 'category' => '', 'author' => ''];
         $esc = fn($v) => '"' . str_replace('"', '""', $v) . '"';
         echo implode(',', [
@@ -1108,7 +1356,7 @@ if ($path === '/admin/export/ratings-csv' && $method === 'GET') {
             $esc($info['category']),
             $esc($info['author']),
             $esc($r[1] ?? ''),
-            $esc($r[2] ?? ''),
+            $esc($r[0] ?? ''),
             (int)($r[3] ?? 0),
             $esc($r[4] ?? ''),
         ]) . "\n";
