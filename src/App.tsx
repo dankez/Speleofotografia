@@ -12,8 +12,9 @@ import AdminDashboard from "./components/AdminDashboard";
 import EvaluatorInterface from "./components/EvaluatorInterface";
 import AdminSetup from "./components/AdminSetup";
 import PublicGallery from "./components/PublicGallery";
+import Results from "./components/Results";
 
-type View = "home" | "admin" | "evaluator" | "admin-setup" | "public";
+type View = "home" | "admin" | "evaluator" | "admin-setup" | "public" | "results";
 
 export type Lang = "sk" | "en";
 
@@ -62,6 +63,15 @@ export interface Settings {
   googleAnalyticsId?: string;
   turnstileEnabled?: boolean;
   turnstileSiteKey?: string;
+  awards?: {
+    id: string;
+    type: 'grand_prize' | 'cat_a_1' | 'cat_a_2' | 'cat_a_3' | 'cat_b_1' | 'cat_b_2' | 'cat_b_3' | 'public_choice' | 'custom';
+    titleSk: string;
+    titleEn: string;
+    photoId: string;
+    descriptionSk?: string;
+    descriptionEn?: string;
+  }[];
 }
 
 export default function App() {
@@ -101,7 +111,12 @@ export default function App() {
     try {
       const res = await fetch("/api/settings");
       if (res.ok) {
-        setSettings(await res.json());
+        const data = await res.json();
+        setSettings(data);
+        const params = new URLSearchParams(window.location.search);
+        if (data.contestStatus === "results" && !params.get("view") && !params.get("eval") && !params.get("token")) {
+          setCurrentView("results");
+        }
       }
     } catch (e) {
       console.error(e);
@@ -111,6 +126,7 @@ export default function App() {
   };
 
   const navItems = [
+    ...(settings?.contestStatus === "results" ? [{ id: "results", label: lang === "sk" ? "Výsledky / Results" : "Results", icon: Trophy }] : []),
     { id: "public", label: lang === "sk" ? "Galéria / Gallery" : "Public Mosaic", icon: Camera },
     { id: "home", label: lang === "sk" ? "Prihláška / Form" : "Registration / Form", icon: Camera },
     { id: "admin", label: lang === "sk" ? "Admin / Kontrola" : "Admin / Control", icon: Shield },
@@ -281,6 +297,17 @@ export default function App() {
                     )}
                   </motion.div>
                 )}
+
+              {currentView === "results" && (
+                <motion.div
+                  key="results"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                >
+                  <Results lang={lang} isIframe={isIframe} />
+                </motion.div>
+              )}
 
               {currentView === "public" && (
                 <motion.div

@@ -55,6 +55,15 @@ interface ContestSettings {
   turnstileSecretKey: string;
   rateLimitVotes: string;
   rateLimitWindow: string;
+  awards?: {
+    id: string;
+    type: 'grand_prize' | 'cat_a_1' | 'cat_a_2' | 'cat_a_3' | 'cat_b_1' | 'cat_b_2' | 'cat_b_3' | 'public_choice' | 'custom';
+    titleSk: string;
+    titleEn: string;
+    photoId: string;
+    descriptionSk?: string;
+    descriptionEn?: string;
+  }[];
 }
 
 export default function AdminDashboard({ lang }: { lang: Lang }) {
@@ -107,7 +116,8 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
     turnstileSiteKey: "1x00000000000000000000AA",
     turnstileSecretKey: "1x0000000000000000000000000000000E",
     rateLimitVotes: "5",
-    rateLimitWindow: "3600"
+    rateLimitWindow: "3600",
+    awards: []
   });
 
   const toggleSelectPhoto = (id: string) => {
@@ -160,6 +170,9 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
   const [adminList, setAdminList] = useState<any[]>([]);
   const [publicResults, setPublicResults] = useState<Array<{id: string; name: string; author: string; category: string; webPath: string; voteCount: number}>>([]);
   const [inviteEmail, setInviteEmail] = useState("");
+  const [newAwardType, setNewAwardType] = useState<'grand_prize' | 'cat_a_1' | 'cat_a_2' | 'cat_a_3' | 'cat_b_1' | 'cat_b_2' | 'cat_b_3' | 'public_choice' | 'custom'>("custom");
+  const [newAwardTitleSk, setNewAwardTitleSk] = useState("");
+  const [newAwardTitleEn, setNewAwardTitleEn] = useState("");
   const [inviteStatus, setInviteStatus] = useState<"idle" | "sending" | "success" | "error">("idle");
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
   const [photoFilter, setPhotoFilter] = useState<string>("all");
@@ -515,12 +528,13 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
 
   const fetchData = async () => {
     try {
-      const [statsRes, photosRes, evalsRes, dashStatsRes, ratingsRes] = await Promise.all([
+      const [statsRes, photosRes, evalsRes, dashStatsRes, ratingsRes, publicResultsRes] = await Promise.all([
         fetch("/api/stats"),
         fetchWithAuth("/api/admin/photos"),
         fetchWithAuth("/api/evaluators"),
         fetchWithAuth("/api/admin/dashboard-stats"),
         fetchWithAuth("/api/admin/ratings"),
+        fetchWithAuth("/api/admin/public-results").catch(() => null),
       ]);
       
       const statsData = await (statsRes.ok ? statsRes.json() : Promise.resolve({}));
@@ -528,6 +542,15 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
       const evalsData = await (evalsRes.ok ? evalsRes.json() : Promise.resolve([]));
       const dashStatsData = await (dashStatsRes.ok ? dashStatsRes.json() : Promise.resolve({}));
       const ratingsData: {photoId: string; averageScore: number; scoreCount: number}[] = await (ratingsRes.ok ? ratingsRes.json() : Promise.resolve([]));
+      const publicResultsData = publicResultsRes && publicResultsRes.ok ? await publicResultsRes.json() : [];
+
+      // Vytvor mapu verejných hlasov
+      const votesMap: Record<string, number> = {};
+      if (Array.isArray(publicResultsData)) {
+        publicResultsData.forEach((p: any) => {
+          votesMap[p.id] = p.voteCount || 0;
+        });
+      }
 
       // Pripiš averageScore a scoreCount každej fotke
       const ratingsMap: Record<string, {averageScore: number; scoreCount: number}> = {};
@@ -535,7 +558,11 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
         ratingsData.forEach(r => { ratingsMap[r.photoId] = { averageScore: r.averageScore, scoreCount: r.scoreCount }; });
       }
       const photosWithScores = Array.isArray(photosData)
-        ? photosData.map((p: any) => ({ ...p, ...(ratingsMap[p.id] || { averageScore: 0, scoreCount: 0 }) }))
+        ? photosData.map((p: any) => ({ 
+            ...p, 
+            ...(ratingsMap[p.id] || { averageScore: 0, scoreCount: 0 }),
+            voteCount: votesMap[p.id] || 0
+          }))
         : [];
 
       setStats(statsData);
@@ -1353,6 +1380,241 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                       </div>
                     ))}
                   </div>
+                </div>
+              </div>
+
+              {/* AWARDS MANAGER SECTION */}
+              <div className="space-y-6 pt-6 border-t border-border">
+                <div className="flex justify-between items-center pb-2 border-b border-border">
+                  <h3 className="text-[11px] font-bold uppercase tracking-[2px] text-muted">
+                    {lang === "sk" ? "Správca ocenení" : "Awards Manager"}
+                  </h3>
+                  
+                  {/* Default generator button */}
+                  {(!settings.awards || settings.awards.length === 0) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const defaults = [
+                          { type: 'grand_prize', titleSk: 'Grand Prize', titleEn: 'Grand Prize' },
+                          { type: 'cat_a_1', titleSk: '1. miesto – Krása jaskýň', titleEn: '1st Place – Beauty of Caves' },
+                          { type: 'cat_a_2', titleSk: '2. miesto – Krása jaskýň', titleEn: '2nd Place – Beauty of Caves' },
+                          { type: 'cat_a_3', titleSk: '3. miesto – Krása jaskýň', titleEn: '3rd Place – Beauty of Caves' },
+                          { type: 'cat_b_1', titleSk: '1. miesto – Speleomoment', titleEn: '1st Place – Speleomoment' },
+                          { type: 'cat_b_2', titleSk: '2. miesto – Speleomoment', titleEn: '2nd Place – Speleomoment' },
+                          { type: 'cat_b_3', titleSk: '3. miesto – Speleomoment', titleEn: '3rd Place – Speleomoment' },
+                          { type: 'public_choice', titleSk: 'Cena verejnosti', titleEn: 'Public Choice' }
+                        ].map(a => ({
+                          id: Math.random().toString(36).substr(2, 9),
+                          type: a.type as any,
+                          titleSk: a.titleSk,
+                          titleEn: a.titleEn,
+                          photoId: "",
+                          descriptionSk: "",
+                          descriptionEn: ""
+                        }));
+                        setSettings({ ...settings, awards: defaults });
+                      }}
+                      className="px-4 py-2 border border-accent text-accent hover:bg-accent/5 text-[9px] font-bold uppercase tracking-widest flex items-center gap-1.5 transition-colors"
+                    >
+                      <Sparkles size={12} />
+                      {lang === "sk" ? "Vygenerovať predvolené ceny" : "Generate Default Awards"}
+                    </button>
+                  )}
+                </div>
+
+                {/* Add custom award form */}
+                <div className="p-4 bg-paper border border-border space-y-4">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-muted">
+                    {lang === "sk" ? "Pridať nové ocenenie" : "Add New Award"}
+                  </p>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-[8px] font-bold uppercase text-muted block">{lang === "sk" ? "Typ ocenenia" : "Award Type"}</label>
+                      <select
+                        value={newAwardType}
+                        onChange={e => setNewAwardType(e.target.value as any)}
+                        className="w-full p-2.5 border border-border bg-white text-xs outline-none focus:border-ink"
+                      >
+                        <option value="grand_prize">Grand Prize</option>
+                        <option value="cat_a_1">Category A - 1st Place</option>
+                        <option value="cat_a_2">Category A - 2nd Place</option>
+                        <option value="cat_a_3">Category A - 3rd Place</option>
+                        <option value="cat_b_1">Category B - 1st Place</option>
+                        <option value="cat_b_2">Category B - 2nd Place</option>
+                        <option value="cat_b_3">Category B - 3rd Place</option>
+                        <option value="public_choice">Public Choice</option>
+                        <option value="custom">Custom Award</option>
+                      </select>
+                    </div>
+                    
+                    <div className="space-y-1">
+                      <label className="text-[8px] font-bold uppercase text-muted block">{lang === "sk" ? "Názov ceny (SK)" : "Award Name (SK)"}</label>
+                      <input
+                        type="text"
+                        value={newAwardTitleSk}
+                        onChange={e => setNewAwardTitleSk(e.target.value)}
+                        placeholder="napr. Špeciálne uznanie poroty"
+                        className="w-full p-2 border border-border bg-white text-xs outline-none focus:border-ink"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[8px] font-bold uppercase text-muted block">{lang === "sk" ? "Názov ceny (EN)" : "Award Name (EN)"}</label>
+                      <input
+                        type="text"
+                        value={newAwardTitleEn}
+                        onChange={e => setNewAwardTitleEn(e.target.value)}
+                        placeholder="e.g. Special Jury Mention"
+                        className="w-full p-2 border border-border bg-white text-xs outline-none focus:border-ink"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!newAwardTitleSk || !newAwardTitleEn) return;
+                        const newAward = {
+                          id: Math.random().toString(36).substr(2, 9),
+                          type: newAwardType,
+                          titleSk: newAwardTitleSk,
+                          titleEn: newAwardTitleEn,
+                          photoId: "",
+                          descriptionSk: "",
+                          descriptionEn: ""
+                        };
+                        setSettings({
+                          ...settings,
+                          awards: [...(settings.awards || []), newAward]
+                        });
+                        setNewAwardTitleSk("");
+                        setNewAwardTitleEn("");
+                      }}
+                      disabled={!newAwardTitleSk || !newAwardTitleEn}
+                      className="px-6 py-2.5 bg-ink text-white text-[9px] font-bold uppercase tracking-widest flex items-center gap-1.5 hover:opacity-90 disabled:opacity-30 transition-all"
+                    >
+                      <Plus size={12} />
+                      {lang === "sk" ? "Pridať cenu" : "Add Award"}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Awards List */}
+                <div className="space-y-4">
+                  {(!settings.awards || settings.awards.length === 0) ? (
+                    <p className="text-[10px] italic text-muted text-center py-4 bg-paper/30 border border-dashed border-border">
+                      {lang === "sk" ? "Žiadne ocenenia zatiaľ neboli vytvorené." : "No awards created yet."}
+                    </p>
+                  ) : (
+                    <div className="space-y-4">
+                      {settings.awards.map((award) => {
+                        // Zoradené fotky pre výber
+                        const sortedPhotos = [...photos].sort((a, b) => {
+                          if (award.type === 'public_choice') {
+                            return (b.voteCount || 0) - (a.voteCount || 0);
+                          }
+                          return (b.averageScore || 0) - (a.averageScore || 0);
+                        });
+
+                        return (
+                          <div key={award.id} className="p-5 bg-white border border-border rounded space-y-4 relative shadow-sm hover:shadow transition-all">
+                            <div className="flex justify-between items-start gap-4">
+                              <div>
+                                <span className="text-[8px] font-extrabold uppercase px-2 py-0.5 bg-zinc-100 border border-zinc-200 rounded text-zinc-600 tracking-wider">
+                                  {award.type}
+                                </span>
+                                <h4 className="text-sm font-bold text-ink mt-1.5">
+                                  {lang === "sk" ? award.titleSk : award.titleEn}
+                                </h4>
+                              </div>
+                              
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSettings({
+                                    ...settings,
+                                    awards: (settings.awards || []).filter(a => a.id !== award.id)
+                                  });
+                                }}
+                                className="text-muted hover:text-red-500 transition-colors p-1"
+                                title="Remove Award"
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-4 pt-2">
+                              {/* Winner Photo Dropdown with detailed scores */}
+                              <div className="space-y-1">
+                                <label className="text-[8px] font-bold uppercase text-muted block">
+                                  {lang === "sk" ? "Víťazná fotografia (zobrazuje skóre poroty a verejnosti)" : "Winning Photo (shows jury & public scores)"}
+                                </label>
+                                <select
+                                  value={award.photoId || ""}
+                                  onChange={e => {
+                                    const updated = (settings.awards || []).map(a => 
+                                      a.id === award.id ? { ...a, photoId: e.target.value } : a
+                                    );
+                                    setSettings({ ...settings, awards: updated });
+                                  }}
+                                  className="w-full p-2.5 border border-border bg-white text-xs outline-none focus:border-ink"
+                                >
+                                  <option value="">-- Vyberte fotografiu --</option>
+                                  {sortedPhotos.map(p => (
+                                    <option key={p.id} value={p.id}>
+                                      [{p.category === 'A' ? 'A' : 'B'}] {p.author} - {p.name} [Porota: {p.averageScore || 0}b | Verejnosť: {p.voteCount || 0} hlasov]
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              {/* Description fields */}
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="space-y-1">
+                                  <label className="text-[8px] font-bold uppercase text-muted block">
+                                    {lang === "sk" ? "Zdôvodnenie / Popis ceny (SK)" : "Description / Citation (SK)"}
+                                  </label>
+                                  <textarea
+                                    value={award.descriptionSk || ""}
+                                    onChange={e => {
+                                      const updated = (settings.awards || []).map(a => 
+                                        a.id === award.id ? { ...a, descriptionSk: e.target.value } : a
+                                      );
+                                      setSettings({ ...settings, awards: updated });
+                                    }}
+                                    rows={2}
+                                    placeholder="napr. Za neuveriteľnú hru svetla a kompozíciu..."
+                                    className="w-full p-2 border border-border bg-white text-xs outline-none focus:border-ink resize-none"
+                                  />
+                                </div>
+
+                                <div className="space-y-1">
+                                  <label className="text-[8px] font-bold uppercase text-muted block">
+                                    {lang === "sk" ? "Zdôvodnenie / Popis ceny (EN)" : "Description / Citation (EN)"}
+                                  </label>
+                                  <textarea
+                                    value={award.descriptionEn || ""}
+                                    onChange={e => {
+                                      const updated = (settings.awards || []).map(a => 
+                                        a.id === award.id ? { ...a, descriptionEn: e.target.value } : a
+                                      );
+                                      setSettings({ ...settings, awards: updated });
+                                    }}
+                                    rows={2}
+                                    placeholder="e.g. For incredible play of light and composition..."
+                                    className="w-full p-2 border border-border bg-white text-xs outline-none focus:border-ink resize-none"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
 

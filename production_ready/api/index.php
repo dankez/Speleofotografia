@@ -316,6 +316,110 @@ if ($path === '/check-uploads' && $method === 'GET') {
 }
 
 // ============================================================
+// === PUBLIC: VÝSLEDKY SÚŤAŽE
+// ============================================================
+if ($path === '/public/results' && $method === 'GET') {
+    $s = read_settings();
+    $photos = read_registrations();
+    
+    // Načítaj porotcov a hodnotenia poroty
+    $juryScores = [];
+    if (file_exists(RATINGS_CSV)) {
+        $rlines = file(RATINGS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        array_shift($rlines);
+        foreach ($rlines as $rl) {
+            $r = str_getcsv($rl);
+            $pid = $r[2] ?? '';
+            $score = (int)($r[3] ?? 0);
+            if ($pid) {
+                $juryScores[$pid] = ($juryScores[$pid] ?? 0) + $score;
+            }
+        }
+    }
+
+    // Načítaj verejné hlasy
+    $publicVotes = [];
+    if (file_exists(PUBLIC_VOTES_CSV)) {
+        $vlines = file(PUBLIC_VOTES_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        array_shift($vlines);
+        foreach ($vlines as $v) {
+            $r = str_getcsv($v);
+            $pid = $r[0] ?? '';
+            if ($pid) {
+                $publicVotes[$pid] = ($publicVotes[$pid] ?? 0) + 1;
+            }
+        }
+    }
+
+    // Mapovanie fotiek na ich indexované pole pre rýchle vyhľadávanie
+    $photosMap = [];
+    foreach ($photos as $p) {
+        // Anonymizujeme kontaktné údaje pre verejný výstup
+        $anonymized = [
+            'id'           => $p['id'],
+            'author'       => $p['author'],
+            'category'     => $p['category'],
+            'name'         => $p['name'],
+            'webPath'      => $p['webPath'],
+            'description'  => $p['description'],
+            'juryScore'    => $juryScores[$p['id']] ?? 0,
+            'publicVotes'  => $publicVotes[$p['id']] ?? 0,
+        ];
+        $photosMap[$p['id']] = $anonymized;
+    }
+
+    // Načítaj priradené ocenenia zo settings
+    $awards = $s['awards'] ?? [];
+    $resolvedAwards = [];
+    $awardedPhotoIds = [];
+
+    foreach ($awards as $a) {
+        $pid = $a['photoId'] ?? '';
+        $photoDetail = null;
+        if ($pid && isset($photosMap[$pid])) {
+            $photoDetail = $photosMap[$pid];
+            $awardedPhotoIds[] = $pid;
+        }
+        
+        $resolvedAwards[] = [
+            'id'            => $a['id'],
+            'type'          => $a['type'],
+            'titleSk'       => $a['titleSk'] ?? '',
+            'titleEn'       => $a['titleEn'] ?? '',
+            'descriptionSk' => $a['descriptionSk'] ?? '',
+            'descriptionEn' => $a['descriptionEn'] ?? '',
+            'photo'         => $photoDetail
+        ];
+    }
+
+    // Zostav výstavnú galériu (Exhibition Gallery)
+    // Zahrnieme fotky, ktoré sú shortlisted alebo majú hodnotenie a vynecháme víťazov ocenení
+    $exhibition = [];
+    foreach ($photos as $p) {
+        if (in_array($p['id'], $awardedPhotoIds)) {
+            continue; // Vynechaj víťazov hlavných ocenení
+        }
+        
+        if ($p['shortlisted'] === true || ($juryScores[$p['id']] ?? 0) > 0 || ($publicVotes[$p['id']] ?? 0) > 0) {
+            $exhibition[] = $photosMap[$p['id']];
+        }
+    }
+
+    // Zoradiť výstavnú galériu podľa celkového skóre poroty
+    usort($exhibition, function($a, $b) {
+        return $b['juryScore'] - $a['juryScore'];
+    });
+
+    send_json([
+        'edition'     => $s['edition'] ?? '',
+        'contestName' => $s['contestName'] ?? 'Speleofotografia',
+        'museumName'  => $s['museumName'] ?? '',
+        'awards'      => $resolvedAwards,
+        'exhibition'  => $exhibition
+    ]);
+}
+
+// ============================================================
 // === PUBLIC: GALÉRIA (anonymizovaná – bez mena a emailu)
 // ============================================================
 if ($path === '/public/gallery' && $method === 'GET') {

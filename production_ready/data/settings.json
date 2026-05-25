@@ -1,1 +1,40 @@
-{}
+{
+  "contestName": "Speleofotografia 2026",
+  "museumName": "Slovenské múzeum ochrany prírody a jaskyniarstva",
+  "edition": "23. ročník",
+  "contestStatus": "submissions",
+  "catA": "Krása jaskýň / Cave Beauty",
+  "catB": "Speleomoment / Speleomoment",
+  "rulesSk": "Maximálne 5 fotografií na kategóriu. Tlačová kvalita...",
+  "rulesEn": "Maximum 5 photos per category. Print quality...",
+  "maxPhotosPerCategory": "5",
+  "watermarkTemplate": "Speleofotografia 2026",
+  "smtpHost": "",
+  "smtpPort": "",
+  "smtpSecure": "",
+  "smtpUser": "admin@sss.sk",
+  "smtpPass": "adminblesk11",
+  "emailFrom": "admin@sss.sk",
+  "categories": [
+    {
+      "id": "A",
+      "name": "New Category A",
+      "nameSk": "a",
+      "nameEn": "aen",
+      "descRequired": true,
+      "minDesc": 30
+    },
+    {
+      "id": "B",
+      "name": "New Category B",
+      "nameSk": "b",
+      "nameEn": "ben"
+    }
+  ],
+  "debugMode": true,
+  "submissionStart": "2026-05-09",
+  "submissionEnd": "2026-05-24",
+  "judgingStart": "2026-05-09",
+  "judgingEnd": "2026-05-31",
+  "museumNameEn": "Smopaj EN"
+}

@@ -1,2 +1,1 @@
-photoId,judgeName,judgeId,score,timestamp
-test_photo_1,"Judge One",judge_1,5,2026-05-15T06:34:20+00:00
+judgeId,judgeName,photoId,score,timestamp

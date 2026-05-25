@@ -1,1 +1,7 @@
-[]
+[
+  {
+    "email": "admin@sss.sk",
+    "password_hash": "$2y$10$JfeOkrNPt9uWs.FntbPiHuDwIdk3zxHkSP2an4NIsgxlN7ktqH1mS",
+    "role": "superadmin"
+  }
+]
