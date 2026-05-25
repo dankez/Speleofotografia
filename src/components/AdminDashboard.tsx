@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, ChangeEvent } from "react";
-import { BarChart3, Users, Image as ImageIcon, Link as LinkIcon, Plus, Copy, Check, Download, Trash2, Eye, Shield, Settings as SettingsIcon, Mail, UserPlus, Heart, Code, ExternalLink, X, User, LayoutGrid, List, Search, Edit2, TrendingUp, Activity, FileText, Zap, Upload, AlertTriangle } from "lucide-react";
+import { BarChart3, Users, Image as ImageIcon, Link as LinkIcon, Plus, Copy, Check, Download, Trash2, Eye, Shield, Settings as SettingsIcon, Mail, UserPlus, Heart, Code, ExternalLink, X, User, LayoutGrid, List, Search, Edit2, TrendingUp, Activity, FileText, Zap, Upload, AlertTriangle, Sparkles } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/src/lib/utils";
 import type { Photo, Evaluator } from "../types";
