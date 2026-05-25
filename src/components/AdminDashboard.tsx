@@ -1398,42 +1398,55 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
 
               {/* AWARDS MANAGER SECTION */}
               <div className="space-y-6 pt-6 border-t border-border">
-                <div className="flex justify-between items-center pb-2 border-b border-border">
+                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 pb-2 border-b border-border">
                   <h3 className="text-[11px] font-bold uppercase tracking-[2px] text-muted">
                     {lang === "sk" ? "Správca ocenení" : "Awards Manager"}
                   </h3>
                   
-                  {/* Default generator button */}
-                  {(!settings.awards || settings.awards.length === 0) && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const defaults = [
-                          { type: 'grand_prize', titleSk: 'Grand Prize', titleEn: 'Grand Prize' },
-                          { type: 'cat_a_1', titleSk: '1. miesto – Krása jaskýň', titleEn: '1st Place – Beauty of Caves' },
-                          { type: 'cat_a_2', titleSk: '2. miesto – Krása jaskýň', titleEn: '2nd Place – Beauty of Caves' },
-                          { type: 'cat_a_3', titleSk: '3. miesto – Krása jaskýň', titleEn: '3rd Place – Beauty of Caves' },
-                          { type: 'cat_b_1', titleSk: '1. miesto – Speleomoment', titleEn: '1st Place – Speleomoment' },
-                          { type: 'cat_b_2', titleSk: '2. miesto – Speleomoment', titleEn: '2nd Place – Speleomoment' },
-                          { type: 'cat_b_3', titleSk: '3. miesto – Speleomoment', titleEn: '3rd Place – Speleomoment' },
-                          { type: 'public_choice', titleSk: 'Cena verejnosti', titleEn: 'Public Choice' }
-                        ].map(a => ({
-                          id: Math.random().toString(36).substr(2, 9),
-                          type: a.type as any,
-                          titleSk: a.titleSk,
-                          titleEn: a.titleEn,
-                          photoId: "",
-                          descriptionSk: "",
-                          descriptionEn: ""
-                        }));
-                        setSettings({ ...settings, awards: defaults });
-                      }}
-                      className="px-4 py-2 border border-accent text-accent hover:bg-accent/5 text-[9px] font-bold uppercase tracking-widest flex items-center gap-1.5 transition-colors"
+                  <div className="flex flex-wrap items-center gap-2">
+                    {/* Secret results preview button */}
+                    <a
+                      href="/?view=results"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-4 py-2 bg-accent text-white hover:bg-accent/90 text-[9px] font-extrabold uppercase tracking-widest flex items-center gap-1.5 transition-all shadow hover:shadow-md rounded"
                     >
-                      <Sparkles size={12} />
-                      {lang === "sk" ? "Vygenerovať predvolené ceny" : "Generate Default Awards"}
-                    </button>
-                  )}
+                      <Eye size={12} />
+                      {lang === "sk" ? "Otvoriť tajný náhľad výsledkov" : "Open Private Results Preview"} ↗
+                    </a>
+
+                    {/* Default generator button */}
+                    {(!settings.awards || settings.awards.length === 0) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const defaults = [
+                            { type: 'grand_prize', titleSk: 'Grand Prize', titleEn: 'Grand Prize' },
+                            { type: 'cat_a_1', titleSk: '1. miesto – Krása jaskýň', titleEn: '1st Place – Beauty of Caves' },
+                            { type: 'cat_a_2', titleSk: '2. miesto – Krása jaskýň', titleEn: '2nd Place – Beauty of Caves' },
+                            { type: 'cat_a_3', titleSk: '3. miesto – Krása jaskýň', titleEn: '3rd Place – Beauty of Caves' },
+                            { type: 'cat_b_1', titleSk: '1. miesto – Speleomoment', titleEn: '1st Place – Speleomoment' },
+                            { type: 'cat_b_2', titleSk: '2. miesto – Speleomoment', titleEn: '2nd Place – Speleomoment' },
+                            { type: 'cat_b_3', titleSk: '3. miesto – Speleomoment', titleEn: '3rd Place – Speleomoment' },
+                            { type: 'public_choice', titleSk: 'Cena verejnosti', titleEn: 'Public Choice' }
+                          ].map(a => ({
+                            id: Math.random().toString(36).substr(2, 9),
+                            type: a.type as any,
+                            titleSk: a.titleSk,
+                            titleEn: a.titleEn,
+                            photoId: "",
+                            descriptionSk: "",
+                            descriptionEn: ""
+                          }));
+                          setSettings({ ...settings, awards: defaults });
+                        }}
+                        className="px-4 py-2 border border-border hover:bg-zinc-50 text-[9px] font-bold uppercase tracking-widest flex items-center gap-1.5 transition-colors text-muted hover:text-ink rounded"
+                      >
+                        <Sparkles size={12} />
+                        {lang === "sk" ? "Vygenerovať predvolené ceny" : "Generate Default Awards"}
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {/* Add custom award form */}
@@ -1560,11 +1573,6 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                             </div>
 
                             <div className="grid grid-cols-1 gap-4 pt-2">
-                              {/* Winner Photo Dropdown with detailed scores */}
-                              <div className="space-y-1">
-                                <label className="text-[8px] font-bold uppercase text-muted block">
-                                  {lang === "sk" ? "Víťazná fotografia (zobrazuje skóre poroty a verejnosti)" : "Winning Photo (shows jury & public scores)"}
-                                </label>
                               {/* Winner Photo Custom Search Dropdown */}
                               <div className="space-y-1 relative">
                                 <label className="text-[8px] font-bold uppercase text-muted block">
@@ -1729,7 +1737,6 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                                     )}
                                   </div>
                                 )}
-                              </div>
                               </div>
 
                               {/* Description fields */}
