@@ -314,7 +314,7 @@ export default function Results({ lang, isIframe = false }: { lang: Lang; isIfra
                     </div>
                     
                     {/* Podium Column */}
-                    <div className="w-full bg-gradient-to-t from-zinc-200 to-zinc-100 border border-zinc-300 mt-4 p-5 text-center shadow-md flex flex-col justify-between h-[160px]">
+                    <div className="w-full bg-gradient-to-t from-zinc-200 to-zinc-100 border border-zinc-300 mt-4 p-5 text-center shadow-md flex flex-col justify-between min-h-[230px]">
                       <div>
                         <div className="w-8 h-8 rounded-full bg-zinc-300 border-2 border-white shadow flex items-center justify-center text-xs font-bold text-zinc-700 mx-auto -mt-9">
                           2
@@ -322,14 +322,19 @@ export default function Results({ lang, isIframe = false }: { lang: Lang; isIfra
                         <p className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-500 mt-2">
                           {lang === "sk" ? "2. Miesto" : "2nd Place"}
                         </p>
-                        <h4 className="text-sm font-bold text-ink mt-1 truncate max-w-full">
+                        <h4 className="text-sm font-bold text-ink mt-2">
                           {catAPodium.second.photo.author}
                         </h4>
-                        <p className="text-xs italic text-muted mt-1 truncate max-w-full">
+                        <p className="text-xs italic text-muted mt-1">
                           “{catAPodium.second.photo.name}”
                         </p>
+                        {((lang === 'sk' ? catAPodium.second.descriptionSk : catAPodium.second.descriptionEn) || catAPodium.second.photo.description) && (
+                          <p className="text-[10px] text-zinc-600 font-light mt-3 leading-relaxed border-t border-zinc-300/50 pt-2 italic">
+                            “{lang === 'sk' ? (catAPodium.second.descriptionSk || catAPodium.second.photo.description) : (catAPodium.second.descriptionEn || catAPodium.second.photo.description)}”
+                          </p>
+                        )}
                       </div>
-                      <span className="text-[10px] font-bold text-zinc-600 block mt-2">
+                      <span className="text-[10px] font-bold text-zinc-600 block mt-4">
                         {catAPodium.second.photo.juryScore} {lang === "sk" ? "bodov" : "pts"}
                       </span>
                     </div>
@@ -354,7 +359,7 @@ export default function Results({ lang, isIframe = false }: { lang: Lang; isIfra
                     </div>
                     
                     {/* Podium Column - Higher */}
-                    <div className="w-full bg-gradient-to-t from-amber-100 to-amber-50 border border-amber-200 mt-6 p-6 text-center shadow-lg flex flex-col justify-between h-[200px] scale-105 z-10">
+                    <div className="w-full bg-gradient-to-t from-amber-100 to-amber-50 border border-amber-200 mt-6 p-6 text-center shadow-lg flex flex-col justify-between min-h-[270px] scale-105 z-10">
                       <div>
                         <div className="w-10 h-10 rounded-full bg-amber-400 border-2 border-white shadow-lg flex items-center justify-center text-sm font-bold text-white mx-auto -mt-11">
                           1
@@ -362,14 +367,19 @@ export default function Results({ lang, isIframe = false }: { lang: Lang; isIfra
                         <p className="text-[10px] font-extrabold uppercase tracking-widest text-amber-600 mt-2">
                           {lang === "sk" ? "1. Miesto" : "1st Place"}
                         </p>
-                        <h4 className="text-base font-bold text-ink mt-1 truncate max-w-full">
+                        <h4 className="text-base font-bold text-ink mt-2">
                           {catAPodium.first.photo.author}
                         </h4>
-                        <p className="text-xs italic text-muted mt-1 truncate max-w-full">
+                        <p className="text-xs italic text-muted mt-1">
                           “{catAPodium.first.photo.name}”
                         </p>
+                        {((lang === 'sk' ? catAPodium.first.descriptionSk : catAPodium.first.descriptionEn) || catAPodium.first.photo.description) && (
+                          <p className="text-[11px] text-amber-800 font-light mt-3 leading-relaxed border-t border-amber-200/50 pt-2 italic">
+                            “{lang === 'sk' ? (catAPodium.first.descriptionSk || catAPodium.first.photo.description) : (catAPodium.first.descriptionEn || catAPodium.first.photo.description)}”
+                          </p>
+                        )}
                       </div>
-                      <span className="text-xs font-bold text-amber-700 block mt-2">
+                      <span className="text-xs font-bold text-amber-700 block mt-4">
                         {catAPodium.first.photo.juryScore} {lang === "sk" ? "bodov" : "pts"}
                       </span>
                     </div>
@@ -394,7 +404,7 @@ export default function Results({ lang, isIframe = false }: { lang: Lang; isIfra
                     </div>
                     
                     {/* Podium Column */}
-                    <div className="w-full bg-gradient-to-t from-orange-200 to-orange-100 border border-orange-300 mt-4 p-5 text-center shadow-md flex flex-col justify-between h-[140px]">
+                    <div className="w-full bg-gradient-to-t from-orange-200 to-orange-100 border border-orange-300 mt-4 p-5 text-center shadow-md flex flex-col justify-between min-h-[210px]">
                       <div>
                         <div className="w-8 h-8 rounded-full bg-orange-300 border-2 border-white shadow flex items-center justify-center text-xs font-bold text-orange-800 mx-auto -mt-9">
                           3
@@ -402,14 +412,19 @@ export default function Results({ lang, isIframe = false }: { lang: Lang; isIfra
                         <p className="text-[10px] font-extrabold uppercase tracking-widest text-orange-600 mt-2">
                           {lang === "sk" ? "3. Miesto" : "3rd Place"}
                         </p>
-                        <h4 className="text-sm font-bold text-ink mt-1 truncate max-w-full">
+                        <h4 className="text-sm font-bold text-ink mt-2">
                           {catAPodium.third.photo.author}
                         </h4>
-                        <p className="text-xs italic text-muted mt-1 truncate max-w-full">
+                        <p className="text-xs italic text-muted mt-1">
                           “{catAPodium.third.photo.name}”
                         </p>
+                        {((lang === 'sk' ? catAPodium.third.descriptionSk : catAPodium.third.descriptionEn) || catAPodium.third.photo.description) && (
+                          <p className="text-[10px] text-zinc-600 font-light mt-3 leading-relaxed border-t border-orange-200/50 pt-2 italic">
+                            “{lang === 'sk' ? (catAPodium.third.descriptionSk || catAPodium.third.photo.description) : (catAPodium.third.descriptionEn || catAPodium.third.photo.description)}”
+                          </p>
+                        )}
                       </div>
-                      <span className="text-[10px] font-bold text-orange-800 block mt-2">
+                      <span className="text-[10px] font-bold text-orange-800 block mt-4">
                         {catAPodium.third.photo.juryScore} {lang === "sk" ? "bodov" : "pts"}
                       </span>
                     </div>
@@ -449,7 +464,7 @@ export default function Results({ lang, isIframe = false }: { lang: Lang; isIfra
                     </div>
                     
                     {/* Podium Column */}
-                    <div className="w-full bg-gradient-to-t from-zinc-200 to-zinc-100 border border-zinc-300 mt-4 p-5 text-center shadow-md flex flex-col justify-between h-[160px]">
+                    <div className="w-full bg-gradient-to-t from-zinc-200 to-zinc-100 border border-zinc-300 mt-4 p-5 text-center shadow-md flex flex-col justify-between min-h-[230px]">
                       <div>
                         <div className="w-8 h-8 rounded-full bg-zinc-300 border-2 border-white shadow flex items-center justify-center text-xs font-bold text-zinc-700 mx-auto -mt-9">
                           2
@@ -457,14 +472,19 @@ export default function Results({ lang, isIframe = false }: { lang: Lang; isIfra
                         <p className="text-[10px] font-extrabold uppercase tracking-widest text-zinc-500 mt-2">
                           {lang === "sk" ? "2. Miesto" : "2nd Place"}
                         </p>
-                        <h4 className="text-sm font-bold text-ink mt-1 truncate max-w-full">
+                        <h4 className="text-sm font-bold text-ink mt-2">
                           {catBPodium.second.photo.author}
                         </h4>
-                        <p className="text-xs italic text-muted mt-1 truncate max-w-full">
+                        <p className="text-xs italic text-muted mt-1">
                           “{catBPodium.second.photo.name}”
                         </p>
+                        {((lang === 'sk' ? catBPodium.second.descriptionSk : catBPodium.second.descriptionEn) || catBPodium.second.photo.description) && (
+                          <p className="text-[10px] text-zinc-600 font-light mt-3 leading-relaxed border-t border-zinc-300/50 pt-2 italic">
+                            “{lang === 'sk' ? (catBPodium.second.descriptionSk || catBPodium.second.photo.description) : (catBPodium.second.descriptionEn || catBPodium.second.photo.description)}”
+                          </p>
+                        )}
                       </div>
-                      <span className="text-[10px] font-bold text-zinc-600 block mt-2">
+                      <span className="text-[10px] font-bold text-zinc-600 block mt-4">
                         {catBPodium.second.photo.juryScore} {lang === "sk" ? "bodov" : "pts"}
                       </span>
                     </div>
@@ -489,7 +509,7 @@ export default function Results({ lang, isIframe = false }: { lang: Lang; isIfra
                     </div>
                     
                     {/* Podium Column - Higher */}
-                    <div className="w-full bg-gradient-to-t from-amber-100 to-amber-50 border border-amber-200 mt-6 p-6 text-center shadow-lg flex flex-col justify-between h-[200px] scale-105 z-10">
+                    <div className="w-full bg-gradient-to-t from-amber-100 to-amber-50 border border-amber-200 mt-6 p-6 text-center shadow-lg flex flex-col justify-between min-h-[270px] scale-105 z-10">
                       <div>
                         <div className="w-10 h-10 rounded-full bg-amber-400 border-2 border-white shadow-lg flex items-center justify-center text-sm font-bold text-white mx-auto -mt-11">
                           1
@@ -497,14 +517,19 @@ export default function Results({ lang, isIframe = false }: { lang: Lang; isIfra
                         <p className="text-[10px] font-extrabold uppercase tracking-widest text-amber-600 mt-2">
                           {lang === "sk" ? "1. Miesto" : "1st Place"}
                         </p>
-                        <h4 className="text-base font-bold text-ink mt-1 truncate max-w-full">
+                        <h4 className="text-base font-bold text-ink mt-2">
                           {catBPodium.first.photo.author}
                         </h4>
-                        <p className="text-xs italic text-muted mt-1 truncate max-w-full">
+                        <p className="text-xs italic text-muted mt-1">
                           “{catBPodium.first.photo.name}”
                         </p>
+                        {((lang === 'sk' ? catBPodium.first.descriptionSk : catBPodium.first.descriptionEn) || catBPodium.first.photo.description) && (
+                          <p className="text-[11px] text-amber-800 font-light mt-3 leading-relaxed border-t border-amber-200/50 pt-2 italic">
+                            “{lang === 'sk' ? (catBPodium.first.descriptionSk || catBPodium.first.photo.description) : (catBPodium.first.descriptionEn || catBPodium.first.photo.description)}”
+                          </p>
+                        )}
                       </div>
-                      <span className="text-xs font-bold text-amber-700 block mt-2">
+                      <span className="text-xs font-bold text-amber-700 block mt-4">
                         {catBPodium.first.photo.juryScore} {lang === "sk" ? "bodov" : "pts"}
                       </span>
                     </div>
@@ -529,7 +554,7 @@ export default function Results({ lang, isIframe = false }: { lang: Lang; isIfra
                     </div>
                     
                     {/* Podium Column */}
-                    <div className="w-full bg-gradient-to-t from-orange-200 to-orange-100 border border-orange-300 mt-4 p-5 text-center shadow-md flex flex-col justify-between h-[140px]">
+                    <div className="w-full bg-gradient-to-t from-orange-200 to-orange-100 border border-orange-300 mt-4 p-5 text-center shadow-md flex flex-col justify-between min-h-[210px]">
                       <div>
                         <div className="w-8 h-8 rounded-full bg-orange-300 border-2 border-white shadow flex items-center justify-center text-xs font-bold text-orange-800 mx-auto -mt-9">
                           3
@@ -537,14 +562,19 @@ export default function Results({ lang, isIframe = false }: { lang: Lang; isIfra
                         <p className="text-[10px] font-extrabold uppercase tracking-widest text-orange-600 mt-2">
                           {lang === "sk" ? "3. Miesto" : "3rd Place"}
                         </p>
-                        <h4 className="text-sm font-bold text-ink mt-1 truncate max-w-full">
+                        <h4 className="text-sm font-bold text-ink mt-2">
                           {catBPodium.third.photo.author}
                         </h4>
-                        <p className="text-xs italic text-muted mt-1 truncate max-w-full">
+                        <p className="text-xs italic text-muted mt-1">
                           “{catBPodium.third.photo.name}”
                         </p>
+                        {((lang === 'sk' ? catBPodium.third.descriptionSk : catBPodium.third.descriptionEn) || catAPodium.third.photo.description) && (
+                          <p className="text-[10px] text-zinc-600 font-light mt-3 leading-relaxed border-t border-orange-200/50 pt-2 italic">
+                            “{lang === 'sk' ? (catBPodium.third.descriptionSk || catAPodium.third.photo.description) : (catBPodium.third.descriptionEn || catAPodium.third.photo.description)}”
+                          </p>
+                        )}
                       </div>
-                      <span className="text-[10px] font-bold text-orange-800 block mt-2">
+                      <span className="text-[10px] font-bold text-orange-800 block mt-4">
                         {catBPodium.third.photo.juryScore} {lang === "sk" ? "bodov" : "pts"}
                       </span>
                     </div>
