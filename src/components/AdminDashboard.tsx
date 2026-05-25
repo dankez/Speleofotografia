@@ -173,6 +173,8 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
   const [newAwardType, setNewAwardType] = useState<'grand_prize' | 'cat_a_1' | 'cat_a_2' | 'cat_a_3' | 'cat_b_1' | 'cat_b_2' | 'cat_b_3' | 'public_choice' | 'custom'>("custom");
   const [newAwardTitleSk, setNewAwardTitleSk] = useState("");
   const [newAwardTitleEn, setNewAwardTitleEn] = useState("");
+  const [awardSearches, setAwardSearches] = useState<Record<string, string>>({});
+  const [activeAwardDropdown, setActiveAwardDropdown] = useState<string | null>(null);
   const [inviteStatus, setInviteStatus] = useState<"idle" | "sending" | "success" | "error">("idle");
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "success" | "error">("idle");
   const [photoFilter, setPhotoFilter] = useState<string>("all");
@@ -1552,23 +1554,171 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                                 <label className="text-[8px] font-bold uppercase text-muted block">
                                   {lang === "sk" ? "Víťazná fotografia (zobrazuje skóre poroty a verejnosti)" : "Winning Photo (shows jury & public scores)"}
                                 </label>
-                                <select
-                                  value={award.photoId || ""}
-                                  onChange={e => {
-                                    const updated = (settings.awards || []).map(a => 
-                                      a.id === award.id ? { ...a, photoId: e.target.value } : a
+                              {/* Winner Photo Custom Search Dropdown */}
+                              <div className="space-y-1 relative">
+                                <label className="text-[8px] font-bold uppercase text-muted block">
+                                  {lang === "sk" ? "Víťazná fotografia (zobrazuje skóre poroty a verejnosti)" : "Winning Photo (shows jury & public scores)"}
+                                </label>
+                                
+                                {award.photoId && photos.find(p => p.id === award.photoId) ? (
+                                  // Selected Photo View
+                                  (() => {
+                                    const selected = photos.find(p => p.id === award.photoId)!;
+                                    return (
+                                      <div className="flex items-center justify-between p-2 border border-border bg-zinc-50 rounded">
+                                        <div className="flex items-center gap-3 min-w-0">
+                                          {selected.webPath && (
+                                            <img
+                                              src={selected.webPath}
+                                              alt={selected.name}
+                                              className="w-10 h-7 object-cover rounded bg-black shrink-0 border border-zinc-200"
+                                            />
+                                          )}
+                                          <div className="min-w-0 leading-tight">
+                                            <p className="text-xs font-bold text-ink truncate">
+                                              {selected.author}
+                                            </p>
+                                            <p className="text-[10px] text-muted italic truncate">
+                                              “{selected.name}”
+                                            </p>
+                                            <p className="text-[8px] uppercase tracking-wider text-muted font-bold mt-0.5">
+                                              [{selected.category === 'A' ? 'A' : 'B'}] Porota: {selected.averageScore || 0}b | Verejnosť: {selected.voteCount || 0} hlasov
+                                            </p>
+                                          </div>
+                                        </div>
+                                        
+                                        <div className="flex gap-1 shrink-0">
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setActiveAwardDropdown(award.id);
+                                              setAwardSearches({ ...awardSearches, [award.id]: "" });
+                                            }}
+                                            className="px-2.5 py-1.5 border border-border text-[9px] font-bold uppercase tracking-wider hover:bg-white transition-colors"
+                                          >
+                                            {lang === "sk" ? "Zmeniť" : "Change"}
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const updated = (settings.awards || []).map(a => 
+                                                a.id === award.id ? { ...a, photoId: "" } : a
+                                              );
+                                              setSettings({ ...settings, awards: updated });
+                                            }}
+                                            className="px-2.5 py-1.5 border border-border text-[9px] font-bold uppercase tracking-wider hover:text-red-500 hover:bg-white transition-colors text-muted"
+                                          >
+                                            {lang === "sk" ? "Zrušiť" : "Clear"}
+                                          </button>
+                                        </div>
+                                      </div>
                                     );
-                                    setSettings({ ...settings, awards: updated });
-                                  }}
-                                  className="w-full p-2.5 border border-border bg-white text-xs outline-none focus:border-ink"
-                                >
-                                  <option value="">-- Vyberte fotografiu --</option>
-                                  {sortedPhotos.map(p => (
-                                    <option key={p.id} value={p.id}>
-                                      [{p.category === 'A' ? 'A' : 'B'}] {p.author} - {p.name} [Porota: {p.averageScore || 0}b | Verejnosť: {p.voteCount || 0} hlasov]
-                                    </option>
-                                  ))}
-                                </select>
+                                  })()
+                                ) : (
+                                  // Not Selected View / Dropdown Search Input
+                                  <div>
+                                    <div className="relative flex items-center">
+                                      <Search size={14} className="absolute left-3 text-muted pointer-events-none" />
+                                      <input
+                                        type="text"
+                                        value={awardSearches[award.id] || ""}
+                                        onChange={e => {
+                                          setAwardSearches({ ...awardSearches, [award.id]: e.target.value });
+                                          setActiveAwardDropdown(award.id);
+                                        }}
+                                        onFocus={() => {
+                                          setActiveAwardDropdown(award.id);
+                                        }}
+                                        placeholder={lang === "sk" ? "Hľadať podľa autora, názvu alebo kategórie (A/B)..." : "Search by author, title or category (A/B)..."}
+                                        className="w-full p-2.5 pl-9 border border-border bg-white text-xs outline-none focus:border-ink"
+                                      />
+                                      {(awardSearches[award.id] || activeAwardDropdown === award.id) && (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setActiveAwardDropdown(null);
+                                            setAwardSearches({ ...awardSearches, [award.id]: "" });
+                                          }}
+                                          className="absolute right-3 text-muted hover:text-ink"
+                                        >
+                                          <X size={14} />
+                                        </button>
+                                      )}
+                                    </div>
+                                    
+                                    {/* Float Dropdown results */}
+                                    {activeAwardDropdown === award.id && (
+                                      <div className="absolute z-50 w-full mt-1 bg-white border border-border rounded shadow-xl max-h-60 overflow-y-auto divide-y divide-zinc-100">
+                                        {(() => {
+                                          const query = (awardSearches[award.id] || "").toLowerCase().trim();
+                                          const filtered = sortedPhotos.filter(p => {
+                                            if (!query) return true;
+                                            return (
+                                              p.author.toLowerCase().includes(query) ||
+                                              p.name.toLowerCase().includes(query) ||
+                                              p.category.toLowerCase() === query ||
+                                              p.id.toLowerCase().includes(query)
+                                            );
+                                          });
+
+                                          if (filtered.length === 0) {
+                                            return (
+                                              <p className="text-[10px] text-muted italic p-3 text-center">
+                                                {lang === "sk" ? "Nenašli sa žiadne vyhovujúce fotografie" : "No matching photos found"}
+                                              </p>
+                                            );
+                                          }
+
+                                          return filtered.map(p => (
+                                            <div
+                                              key={p.id}
+                                              onClick={() => {
+                                                const updated = (settings.awards || []).map(a => 
+                                                  a.id === award.id ? { ...a, photoId: p.id } : a
+                                                );
+                                                setSettings({ ...settings, awards: updated });
+                                                setActiveAwardDropdown(null);
+                                                setAwardSearches({ ...awardSearches, [award.id]: "" });
+                                              }}
+                                              className="flex items-center justify-between p-2 hover:bg-zinc-50 cursor-pointer transition-colors text-left"
+                                            >
+                                              <div className="flex items-center gap-3 min-w-0">
+                                                {p.webPath && (
+                                                  <img
+                                                    src={p.webPath}
+                                                    alt={p.name}
+                                                    className="w-10 h-7 object-cover rounded bg-black shrink-0 border border-zinc-200"
+                                                  />
+                                                )}
+                                                <div className="min-w-0 leading-tight">
+                                                  <p className="text-xs font-bold text-ink truncate">
+                                                    {p.author}
+                                                  </p>
+                                                  <p className="text-[10px] text-muted italic truncate">
+                                                    “{p.name}”
+                                                  </p>
+                                                </div>
+                                              </div>
+                                              
+                                              <div className="flex items-center gap-2 shrink-0 pl-3">
+                                                <span className="text-[8px] font-extrabold uppercase px-1.5 py-0.5 bg-zinc-100 border border-zinc-200 text-zinc-600 rounded">
+                                                  Kat: {p.category}
+                                                </span>
+                                                <span className="text-[9px] font-bold text-zinc-600">
+                                                  P: {p.averageScore || 0}b
+                                                </span>
+                                                <span className="text-[9px] font-bold text-pink-600">
+                                                  V: {p.voteCount || 0}x
+                                                </span>
+                                              </div>
+                                            </div>
+                                          ));
+                                        })()}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
                               </div>
 
                               {/* Description fields */}
