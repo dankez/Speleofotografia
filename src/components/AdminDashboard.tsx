@@ -1580,7 +1580,7 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                                         <div className="flex items-center gap-3 min-w-0">
                                           {selected.webPath && (
                                             <img
-                                              src={selected.webPath}
+                                              src={`/uploads/${selected.webPath || (selected.id + ".webp")}`}
                                               alt={selected.name}
                                               className="w-10 h-7 object-cover rounded bg-black shrink-0 border border-zinc-200"
                                             />
@@ -1696,7 +1696,7 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                                               <div className="flex items-center gap-3 min-w-0">
                                                 {p.webPath && (
                                                   <img
-                                                    src={p.webPath}
+                                                    src={`/uploads/${p.webPath || (p.id + ".webp")}`}
                                                     alt={p.name}
                                                     className="w-10 h-7 object-cover rounded bg-black shrink-0 border border-zinc-200"
                                                   />
