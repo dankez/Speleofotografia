@@ -269,7 +269,7 @@ export default function Results({ lang, isIframe = false }: { lang: Lang; isIfra
                   onClick={() => setSelectedPhoto(grandPrize.photo)}
                 >
                   <img 
-                    src={grandPrize.photo.webPath} 
+                    src={`/uploads/${grandPrize.photo.webPath || (grandPrize.photo.id + ".webp")}`} 
                     alt={grandPrize.photo.name}
                     className="w-full h-full object-cover transition-transform duration-700 group-hover/img:scale-105"
                   />
@@ -304,7 +304,7 @@ export default function Results({ lang, isIframe = false }: { lang: Lang; isIfra
                       onClick={() => setSelectedPhoto(catAPodium.second!.photo)}
                     >
                       <img 
-                        src={catAPodium.second.photo.webPath} 
+                        src={`/uploads/${catAPodium.second.photo.webPath || (catAPodium.second.photo.id + ".webp")}`} 
                         alt={catAPodium.second.photo.name} 
                         className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                       />
@@ -349,7 +349,7 @@ export default function Results({ lang, isIframe = false }: { lang: Lang; isIfra
                       onClick={() => setSelectedPhoto(catAPodium.first!.photo)}
                     >
                       <img 
-                        src={catAPodium.first.photo.webPath} 
+                        src={`/uploads/${catAPodium.first.photo.webPath || (catAPodium.first.photo.id + ".webp")}`} 
                         alt={catAPodium.first.photo.name} 
                         className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                       />
@@ -394,7 +394,7 @@ export default function Results({ lang, isIframe = false }: { lang: Lang; isIfra
                       onClick={() => setSelectedPhoto(catAPodium.third!.photo)}
                     >
                       <img 
-                        src={catAPodium.third.photo.webPath} 
+                        src={`/uploads/${catAPodium.third.photo.webPath || (catAPodium.third.photo.id + ".webp")}`} 
                         alt={catAPodium.third.photo.name} 
                         className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                       />
@@ -454,7 +454,7 @@ export default function Results({ lang, isIframe = false }: { lang: Lang; isIfra
                       onClick={() => setSelectedPhoto(catBPodium.second!.photo)}
                     >
                       <img 
-                        src={catBPodium.second.photo.webPath} 
+                        src={`/uploads/${catBPodium.second.photo.webPath || (catBPodium.second.photo.id + ".webp")}`} 
                         alt={catBPodium.second.photo.name} 
                         className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                       />
@@ -499,7 +499,7 @@ export default function Results({ lang, isIframe = false }: { lang: Lang; isIfra
                       onClick={() => setSelectedPhoto(catBPodium.first!.photo)}
                     >
                       <img 
-                        src={catBPodium.first.photo.webPath} 
+                        src={`/uploads/${catBPodium.first.photo.webPath || (catBPodium.first.photo.id + ".webp")}`} 
                         alt={catBPodium.first.photo.name} 
                         className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                       />
@@ -544,7 +544,7 @@ export default function Results({ lang, isIframe = false }: { lang: Lang; isIfra
                       onClick={() => setSelectedPhoto(catBPodium.third!.photo)}
                     >
                       <img 
-                        src={catBPodium.third.photo.webPath} 
+                        src={`/uploads/${catBPodium.third.photo.webPath || (catBPodium.third.photo.id + ".webp")}`} 
                         alt={catBPodium.third.photo.name} 
                         className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                       />
@@ -628,7 +628,7 @@ export default function Results({ lang, isIframe = false }: { lang: Lang; isIfra
                     onClick={() => setSelectedPhoto(publicChoice.photo)}
                   >
                     <img 
-                      src={publicChoice.photo.webPath} 
+                      src={`/uploads/${publicChoice.photo.webPath || (publicChoice.photo.id + ".webp")}`} 
                       alt={publicChoice.photo.name} 
                       className="w-full h-full object-cover"
                     />
@@ -668,7 +668,7 @@ export default function Results({ lang, isIframe = false }: { lang: Lang; isIfra
                         onClick={() => setSelectedPhoto(a.photo)}
                       >
                         <img 
-                          src={a.photo.webPath} 
+                          src={`/uploads/${a.photo.webPath || (a.photo.id + ".webp")}`} 
                           alt={a.photo.name} 
                           className="w-full h-full object-cover"
                         />
@@ -752,7 +752,7 @@ export default function Results({ lang, isIframe = false }: { lang: Lang; isIfra
                   >
                     <div className="aspect-[4/3] bg-black overflow-hidden relative">
                       <img 
-                        src={photo.webPath} 
+                        src={`/uploads/${photo.webPath || (photo.id + ".webp")}`} 
                         alt={photo.name}
                         className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                       />
@@ -820,7 +820,7 @@ export default function Results({ lang, isIframe = false }: { lang: Lang; isIfra
 
               <div className="relative max-w-full max-h-full flex items-center justify-center">
                 <img 
-                  src={selectedPhoto.webPath} 
+                  src={`/uploads/${selectedPhoto.webPath || (selectedPhoto.id + ".webp")}`} 
                   alt={selectedPhoto.name}
                   className="max-w-[85vw] max-h-[70vh] object-contain shadow-2xl border border-zinc-800"
                 />
