@@ -821,6 +821,17 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                     <option value="shortlist">Shortlist Round</option>
                     <option value="results">Public Results</option>
                   </select>
+                  <div className="pt-1.5">
+                    <a 
+                      href="/?view=results" 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="text-[9px] font-extrabold text-accent uppercase tracking-widest hover:underline inline-flex items-center gap-1.5 transition-all"
+                    >
+                      <Eye size={12} />
+                      {lang === "sk" ? "Otvoriť tajný náhľad výsledkov pred zverejnením" : "Open private results preview before publication"} ↗
+                    </a>
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold uppercase text-muted">Edition</label>

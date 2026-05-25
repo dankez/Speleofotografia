@@ -90,7 +90,7 @@ export default function App() {
 
     // Explicitné nastavenie pohľadu cez URL
     const viewParam = params.get("view") as View;
-    if (viewParam && ["home", "admin", "evaluator", "admin-setup", "public"].includes(viewParam)) {
+    if (viewParam && ["home", "admin", "evaluator", "admin-setup", "public", "results"].includes(viewParam)) {
       setCurrentView(viewParam);
     }
 
@@ -126,7 +126,7 @@ export default function App() {
   };
 
   const navItems = [
-    ...(settings?.contestStatus === "results" ? [{ id: "results", label: lang === "sk" ? "Výsledky / Results" : "Results", icon: Trophy }] : []),
+    ...(settings?.contestStatus === "results" || currentView === "results" ? [{ id: "results", label: lang === "sk" ? "Výsledky / Results" : "Results", icon: Trophy }] : []),
     { id: "public", label: lang === "sk" ? "Galéria / Gallery" : "Public Mosaic", icon: Camera },
     { id: "home", label: lang === "sk" ? "Prihláška / Form" : "Registration / Form", icon: Camera },
     { id: "admin", label: lang === "sk" ? "Admin / Kontrola" : "Admin / Control", icon: Shield },
