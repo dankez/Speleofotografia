@@ -49,7 +49,19 @@ if (!function_exists('getallheaders')) {
 function get_auth_token() {
     $headers = getallheaders();
     $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? '';
-    if (preg_match('/Bearer\s+(.+)$/i', $authHeader, $matches)) {
+    
+    // Záchrana pre Apache FastCGI / WebSupport, kde sa Authorization hlavička stráca
+    if (empty($authHeader)) {
+        $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '';
+    }
+    
+    // Ďalšia záchrana - apache_request_headers() ak existuje a getallheaders() zlyhal
+    if (empty($authHeader) && function_exists('apache_request_headers')) {
+        $aHeaders = apache_request_headers();
+        $authHeader = $aHeaders['Authorization'] ?? $aHeaders['authorization'] ?? '';
+    }
+
+    if ($authHeader && preg_match('/Bearer\s+(.+)$/i', $authHeader, $matches)) {
         return trim($matches[1]);
     }
     // Fallback na query parameter (napr. pre sťahovanie CSV/ZIP cez prehliadač)

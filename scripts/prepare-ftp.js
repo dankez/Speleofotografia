@@ -56,6 +56,10 @@ fs.writeFileSync(path.join(originalsDir, '.gitkeep'), '');
 const htaccessContent = `RewriteEngine On
 RewriteBase /
 
+# Zachovanie Authorization hlavičky pre PHP bežiace cez FastCGI (WebSupport a pod.)
+RewriteCond %{HTTP:Authorization} ^(.*)
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%1]
+
 # 1. Forward all API requests to the PHP backend
 RewriteRule ^api/(.*)$ api/index.php [L,QSA]
 
