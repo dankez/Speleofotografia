@@ -198,13 +198,23 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   
-  const fetchWithAuth = (url: string, options: RequestInit = {}) => {
+  const fetchWithAuth = async (url: string, options: RequestInit = {}) => {
     const token = localStorage.getItem("speleofoto_token");
     const headers = {
       ...options.headers,
       ...(token ? { "Authorization": `Bearer ${token}` } : {})
     };
-    return fetch(url, { ...options, headers });
+    try {
+      const res = await fetch(url, { ...options, headers });
+      if (res.status === 401) {
+        localStorage.removeItem("speleofoto_token");
+        setIsAuthorized(false);
+        setAuthError(lang === "sk" ? "Vaša relácia vypršala alebo bola zrušená. Prihláste sa znova." : "Your session has expired or was revoked. Please log in again.");
+      }
+      return res;
+    } catch (e) {
+      throw e;
+    }
   };
   
   
