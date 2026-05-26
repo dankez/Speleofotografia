@@ -1554,6 +1554,76 @@ if ($path === '/admin/export/ratings-csv' && $method === 'GET') {
 }
 
 // ============================================================
+// === ADMIN: SYSTEM RESET (FACTORY RESET)
+// ============================================================
+if ($path === '/admin/system-reset' && $method === 'POST') {
+    dlog("ADMIN: system-reset requested");
+    $currentToken = get_auth_token();
+
+    // 1. Vyčistíme uploads a uploads/originals
+    $uploadsDir = UPLOADS_DIR;
+    $originalsDir = ORIGINALS_DIR;
+    
+    if (is_dir($uploadsDir)) {
+        $files = glob($uploadsDir . '/*');
+        foreach ($files as $file) {
+            if (is_file($file) && basename($file) !== '.gitkeep') {
+                unlink($file);
+            }
+        }
+    }
+    if (is_dir($originalsDir)) {
+        $files = glob($originalsDir . '/*');
+        foreach ($files as $file) {
+            if (is_file($file) && basename($file) !== '.gitkeep') {
+                unlink($file);
+            }
+        }
+    }
+
+    // 2. Reset databáz (ponecháme len hlavičky)
+    $regHeader = "id,author,email,instagram,webpage,address,category,name,description,webPath,originalPath,metadata,createdAt,shortlisted";
+    file_put_contents(REGISTRATIONS_CSV, $regHeader . "\n");
+
+    $votesHeader = "photoId,ip,userAgent,timestamp";
+    file_put_contents(PUBLIC_VOTES_CSV, $votesHeader . "\n");
+
+    $ratingsHeader = "judgeId,judgeName,photoId,score,timestamp";
+    file_put_contents(RATINGS_CSV, $ratingsHeader . "\n");
+
+    $evalCsvHeader = "id,name,role";
+    file_put_contents(EVALUATORS_CSV, $evalCsvHeader . "\n");
+
+    $visitsHeader = "ip,userAgent,timestamp";
+    if (file_exists(DATA_DIR . '/visits.csv')) {
+        file_put_contents(DATA_DIR . '/visits.csv', $visitsHeader . "\n");
+    }
+
+    if (file_exists(DATA_DIR . '/invitations.json')) {
+        file_put_contents(DATA_DIR . '/invitations.json', "[]");
+    }
+
+    // 3. Reset settings - vyčistíme priradené awards
+    $s = read_settings();
+    $s['awards'] = [];
+    save_settings($s);
+
+    // 4. Vyčistíme tokens.json, ale ponecháme AKTUÁLNY prihlasovací token
+    if (file_exists(TOKENS_JSON)) {
+        $tokens = json_decode(file_get_contents(TOKENS_JSON), true) ?? [];
+        $newTokens = [];
+        if ($currentToken && isset($tokens[$currentToken])) {
+            $newTokens[$currentToken] = $tokens[$currentToken];
+        }
+        file_put_contents(TOKENS_JSON, json_encode($newTokens, JSON_PRETTY_PRINT));
+    }
+
+    dlog("ADMIN: system-reset completed successfully");
+    $lang = $_GET['lang'] ?? 'sk';
+    send_json(['success' => true, 'message' => ($lang === 'en' ? 'System reset completed successfully.' : 'Systém bol úspešne zresetovaný (Factory Reset).')]);
+}
+
+// ============================================================
 // === 404
 // ============================================================
 dlog("404: $method $path");
