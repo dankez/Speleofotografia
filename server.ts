@@ -85,6 +85,51 @@ async function startServer() {
     fs.writeFileSync(PUBLIC_VOTES_CSV, "photoId,createdAt\n");
   }
 
+  // Default settings
+  const DEFAULT_SETTINGS = {
+    // Public settings
+    contestNameSk: "Speleofotografia 2026",
+    contestNameEn: "Speleophotography 2026",
+    museumNameSk: "Slovenské múzeum ochrany prírody a jaskyniarstva",
+    museumNameEn: "Slovak Museum of Nature Protection and Caving",
+    edition: "23. ročník",
+    contestStatus: "submissions",
+    submissionStart: "",
+    submissionEnd: "",
+    judgingStart: "",
+    judgingEnd: "2026-05-31",
+    categories: [
+      { id: "A", nameSk: "Krása jaskýň", nameEn: "Beauty of Caves", minDesc: 100, maxDesc: 5000, descRequired: true },
+      { id: "B", nameSk: "Jaskyniari", nameEn: "Cavers", minDesc: 0, maxDesc: 5000, descRequired: false },
+      { id: "C", nameSk: "Kras v krajine", nameEn: "Karst in Landscape", minDesc: 0, maxDesc: 5000, descRequired: false }
+    ],
+    watermarkFontSize: 24,
+    watermarkColor: "rgba(255,255,255,0.4)",
+    fieldRequirements: {
+      author: true,
+      email: true,
+      instagram: false,
+      address: true
+    },
+    rulesSk: "Maximálne 5 fotografií na kategóriu. Tlačová kvalita...",
+    rulesEn: "Maximum 5 photos per category. Print quality...",
+    rulesText: `SPELEOFOTOGRAFIA 2026\n23. ročník medzinárodnej súťažnej výstavy fotografií...`,
+    debugMode: false,
+    maxPhotosPerCategory: "5",
+    watermarkTemplate: "Speleofotografia 2026",
+    logoUrl: "",
+    
+    // SMTP Settings
+    smtpHost: "smtp.example.com",
+    smtpPort: "587",
+    smtpSecure: "false",
+    smtpUser: "",
+    smtpPass: "",
+    emailFrom: "info@speleofoto.sk",
+    adminEmail: "admin@sss.sk",
+    adminPass: "adminblesk11"
+  };
+
   // Initialize admins database with default admin from settings if empty
   if (!fs.existsSync(ADMINS_JSON)) {
     const defaultAdmins = [
@@ -159,91 +204,6 @@ const getTransporter = (settings: any) => {
     auth: { user, pass },
   });
 };
-
-// Default settings
-const DEFAULT_SETTINGS = {
-  // Public settings
-  contestNameSk: "Speleofotografia 2026",
-  contestNameEn: "Speleophotography 2026",
-  museumNameSk: "Slovenské múzeum ochrany prírody a jaskyniarstva",
-  museumNameEn: "Slovak Museum of Nature Protection and Caving",
-  edition: "23. ročník",
-  contestStatus: "submissions",
-  submissionStart: "",
-  submissionEnd: "",
-  judgingStart: "",
-  judgingEnd: "2026-05-31",
-  categories: [
-    { id: "A", nameSk: "Krása jaskýň", nameEn: "Beauty of Caves", minDesc: 100, maxDesc: 5000, descRequired: true },
-    { id: "B", nameSk: "Jaskyniari", nameEn: "Cavers", minDesc: 0, maxDesc: 5000, descRequired: false },
-    { id: "C", nameSk: "Kras v krajine", nameEn: "Karst in Landscape", minDesc: 0, maxDesc: 5000, descRequired: false }
-  ],
-  watermarkFontSize: 24,
-  watermarkColor: "rgba(255,255,255,0.4)",
-  fieldRequirements: {
-    author: true,
-    email: true,
-    instagram: false,
-    address: true
-  },
-  rulesSk: "Maximálne 5 fotografií na kategóriu. Tlačová kvalita...",
-  rulesEn: "Maximum 5 photos per category. Print quality...",
-  rulesText: `SPELEOFOTOGRAFIA 2026
-23. ročník medzinárodnej súťažnej výstavy fotografií s jaskyniarskou tematikou
-
-1. Organizátori
-Slovenská speleologická spoločnosť
-Štátna ochrana prírody SR – Správa slovenských jaskýň
-Slovenské múzeum ochrany prírody a jaskyniarstva
-Mesto Liptovský Mikuláš
-
-2. Podmienky účasti
-Súťaže sa môže zúčastniť každý fotograf, ktorý splní podmienky týchto propozícií.
-Účasť v súťaži je bezplatná.
-Každý autor môže do jednej kategórie zaslať najviac 5 fotografií.
-Členovia poroty a organizátori sú z účasti v súťaži vylúčení.
-
-3. Súťažné kategórie a ceny
-Kategória A: Fotografia s príbehom – snímky znázorňujúce kras, jaskyne a jaskyniarov doplnené textovým príbehom v rozsahu do 5 000 znakov.
-Kategória B: Speleomoment – reportážna fotografia z jaskyniarskych akcií a expedícií.
-
-Ocenenia:
-V každej kategórii budú ocenené 3 najlepšie práce.
-Hlavná cena Speleofotografie 2026: Absolútny víťaz 23. ročníka vybraný odbornou porotou.
-Cena verejnosti: Na základe hlasovania na sociálnych sieťach.
-
-4. Technické parametre a spôsob prihlásenia
-Súťaž prebieha plne digitálne cez online formulár. Zasielanie prác e-mailom nie je akceptované.
-Technické požiadavky: Minimálne 3 000 px na dlhšej strane, formát .jpg, maximálna veľkosť súboru 5 MB.
-Jazyk: Názvy fotografií a sprievodné informácie musia byť v anglickom jazyku. Príbeh ku kategórii A môže byť v slovenskom alebo anglickom jazyku.
-
-5. Právne ustanovenia (Autorské práva a GDPR)
-Autorské práva: Účastník odoslaním formulára potvrdzuje, že je autorom diel. Autor udeľuje organizátorom súhlas na bezodplatné použitie fotografií na propagáciu súťaže.
-GDPR: Osobné údaje sú spracúvané výhradne za účelom realizácie súťaže v zmysle Nariadenia (EÚ) 2016/679.
-
-6. Harmonogram a porota
-Uzávierka prihlášok: 15. september 2026.
-Zloženie poroty: Pavol Kočiš (SK – predseda), Marek Audy (CZ), Cosmin Berghean (RO), Daniel Lee (RU), Pavol Staník (SK), Lukáš Kubičina (SK).
-Vyhlásenie výsledkov: November 2026, SMOPaJ Liptovský Mikuláš.`,
-  debugMode: false,
-  maxPhotosPerCategory: "5",
-  watermarkTemplate: "Speleofotografia 2026",
-  logoUrl: "",
-  
-  // SMTP Settings
-  smtpHost: "smtp.example.com",
-  smtpPort: "587",
-  smtpSecure: "false",
-  smtpUser: "",
-  smtpPass: "",
-  emailFrom: "info@speleofoto.sk",
-  adminEmail: "admin@sss.sk",
-  adminPass: "adminblesk11"
-};
-
-if (!fs.existsSync(SETTINGS_JSON)) {
-  fs.writeFileSync(SETTINGS_JSON, JSON.stringify(DEFAULT_SETTINGS, null, 2));
-}
 
 // API Routes
 
@@ -1748,13 +1708,13 @@ app.post("/api/admin/login", (req, res) => {
   }
 
   const isProduction = process.env.NODE_ENV === 'production';
-  const listenPath = isProduction ? path.join(process.cwd(), 'server.sock') : PORT;
+  const listenPath = isProduction ? path.join(process.cwd(), 'server.sock') : String(PORT);
 
   if (isProduction && fs.existsSync(listenPath)) {
     fs.unlinkSync(listenPath);
   }
 
-  app.listen(listenPath, () => {
+  app.listen(isProduction ? listenPath : Number(PORT), () => {
     console.log(`Server running on ${isProduction ? 'unix:' + listenPath : 'http://localhost:' + PORT}`);
     if (isProduction) {
       fs.chmodSync(listenPath, '0777');

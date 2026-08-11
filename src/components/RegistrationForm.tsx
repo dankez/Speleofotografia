@@ -293,6 +293,14 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
 
     if (errors.length > 0) {
       setValidationErrors(errors);
+      if (missingAuthorFields.length > 0) {
+        setWizardStep("author");
+      } else if (invalidPhotos.length > 0 || photos.length === 0) {
+        setWizardStep("photos");
+      } else {
+        setWizardStep("consents");
+      }
+      setShowWizard(true);
       return;
     }
 
@@ -377,13 +385,308 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
     );
   }
 
+  // Wizard state for interactive completion modal
+  const [showWizard, setShowWizard] = useState(false);
+  const [wizardStep, setWizardStep] = useState<"author" | "photos" | "consents">("author");
+
+  const missingAuthorFields = useMemo(() => {
+    const list: { id: string; label: string; type: string; placeholder: string; isMissing: boolean }[] = [];
+    const req = settings?.fieldRequirements;
+    if (req?.author && !isValid.author) {
+      list.push({ id: "author", label: lang === "sk" ? "Meno a priezvisko autor (min. 3 znaky)" : "Full Name (min. 3 chars)", type: "text", placeholder: "napr. Ján Slovák", isMissing: true });
+    }
+    if (req?.email && !isValid.email) {
+      list.push({ id: "email", label: lang === "sk" ? "Platná e-mailová adresa" : "Valid Email Address", type: "email", placeholder: "email@example.sk", isMissing: true });
+    }
+    if (req?.address && !isValid.address) {
+      list.push({ id: "address", label: lang === "sk" ? "Korešpondenčná adresa (min. 5 znakov)" : "Address (min. 5 chars)", type: "text", placeholder: "Ulica, PSČ, Mesto, Štát", isMissing: true });
+    }
+    if (req?.instagram && !isValid.instagram) {
+      list.push({ id: "instagram", label: lang === "sk" ? "Instagram účet (začínajúci @)" : "Instagram handle (starting with @)", type: "text", placeholder: "@meno", isMissing: true });
+    }
+    return list;
+  }, [settings, isValid, lang]);
+
+  const invalidPhotos = useMemo(() => {
+    return photos.map((p, idx) => {
+      const catSet = settings?.categories?.find(c => c.id === p.category);
+      const pMin = catSet?.minDesc || 0;
+      const pMax = catSet?.maxDesc || 5000;
+      const pReq = catSet?.descRequired;
+      const len = p.description ? p.description.length : 0;
+      const isMissing = Boolean((pReq && len === 0) || len < pMin || len > pMax);
+      return {
+        idx,
+        photo: p,
+        catName: lang === "sk" ? catSet?.nameSk || p.category : catSet?.nameEn || p.category,
+        minDesc: pMin,
+        maxDesc: pMax,
+        descRequired: pReq,
+        isMissing
+      };
+    }).filter(item => item.isMissing);
+  }, [photos, settings, lang]);
+
+  const missingConsents = useMemo(() => {
+    const list: string[] = [];
+    if (!formData.gdprConsent) list.push(lang === "sk" ? "Súhlas so spracovaním údajov (GDPR)" : "GDPR Consent");
+    if (!formData.rulesConsent) list.push(lang === "sk" ? "Súhlas s pravidlami a vyhlásenie autorstva" : "Agreement with rules and authorship declaration");
+    return list;
+  }, [formData, lang]);
+
+  const scrollToElement = (id: string) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.focus();
+    }
+  };
+
   const req = settings?.fieldRequirements;
 
   return (
     <div className="space-y-12">
-      {/* Detailed Error Modal */}
+      {/* Interactive Step-by-Step Completion Wizard Modal */}
       <AnimatePresence>
-        {validationErrors.length > 0 && (
+        {showWizard && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/60 backdrop-blur-md"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0, y: 10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 10 }}
+              className="bg-white border border-border shadow-2xl max-w-xl w-full p-6 sm:p-8 space-y-6 max-h-[90vh] overflow-y-auto"
+            >
+              <div className="flex items-center justify-between border-b border-border pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-accent/10 text-accent flex items-center justify-center">
+                    <Info size={22} />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold uppercase tracking-wider text-ink">
+                      {lang === "sk" ? "Sprievodca dokončením prihlášky" : "Application Completion Wizard"}
+                    </h3>
+                    <p className="text-[11px] text-muted font-medium">
+                      {lang === "sk" ? "Doplňte chýbajúce údaje, aby bolo možné prihlášku úspešne odoslať" : "Complete missing required fields to submit your application"}
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowWizard(false)} 
+                  className="p-1 text-muted hover:text-ink transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              {/* Wizard Steps Navigation Pills */}
+              <div className="flex border-b border-border text-[11px] font-bold uppercase tracking-wider">
+                <button 
+                  onClick={() => setWizardStep("author")}
+                  className={cn(
+                    "flex-1 py-2 text-center border-b-2 transition-all flex items-center justify-center gap-1.5",
+                    wizardStep === "author" ? "border-accent text-accent" : "border-transparent text-muted hover:text-ink"
+                  )}
+                >
+                  {missingAuthorFields.length > 0 ? (
+                    <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" />
+                  ) : (
+                    <CheckCircle2 size={13} className="text-green-500 shrink-0" />
+                  )}
+                  {lang === "sk" ? "1. Autor" : "1. Author"}
+                </button>
+                <button 
+                  onClick={() => setWizardStep("photos")}
+                  className={cn(
+                    "flex-1 py-2 text-center border-b-2 transition-all flex items-center justify-center gap-1.5",
+                    wizardStep === "photos" ? "border-accent text-accent" : "border-transparent text-muted hover:text-ink"
+                  )}
+                >
+                  {invalidPhotos.length > 0 || photos.length === 0 ? (
+                    <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" />
+                  ) : (
+                    <CheckCircle2 size={13} className="text-green-500 shrink-0" />
+                  )}
+                  {lang === "sk" ? "2. Príbehy fotiek" : "2. Photo Stories"}
+                </button>
+                <button 
+                  onClick={() => setWizardStep("consents")}
+                  className={cn(
+                    "flex-1 py-2 text-center border-b-2 transition-all flex items-center justify-center gap-1.5",
+                    wizardStep === "consents" ? "border-accent text-accent" : "border-transparent text-muted hover:text-ink"
+                  )}
+                >
+                  {missingConsents.length > 0 ? (
+                    <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" />
+                  ) : (
+                    <CheckCircle2 size={13} className="text-green-500 shrink-0" />
+                  )}
+                  {lang === "sk" ? "3. Súhlasy" : "3. Consents"}
+                </button>
+              </div>
+
+              {/* Wizard Body Content based on Step */}
+              <div className="space-y-5">
+                {wizardStep === "author" && (
+                  <div className="space-y-4">
+                    {missingAuthorFields.length === 0 ? (
+                      <div className="p-4 bg-green-50 border border-green-200 text-green-700 text-xs flex items-center gap-2">
+                        <CheckCircle2 size={16} />
+                        {lang === "sk" ? "Všetky údaje o autorovi sú vyplnené správne." : "Author details are complete and valid."}
+                      </div>
+                    ) : (
+                      missingAuthorFields.map((field) => (
+                        <div key={field.id} className="space-y-1.5">
+                          <label className="text-[11px] font-bold uppercase tracking-wider text-ink">
+                            {field.label} *
+                          </label>
+                          <input 
+                            type={field.type}
+                            value={(formData as any)[field.id] || ""}
+                            onChange={(e) => setFormData({ ...formData, [field.id]: e.target.value })}
+                            placeholder={field.placeholder}
+                            className="w-full p-3 border border-border bg-paper/20 text-sm focus:border-accent focus:bg-white outline-none transition-all"
+                          />
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+
+                {wizardStep === "photos" && (
+                  <div className="space-y-4">
+                    {photos.length === 0 ? (
+                      <div className="p-4 bg-amber-50 border border-amber-200 text-amber-800 text-xs flex flex-col gap-2">
+                        <p className="font-bold uppercase tracking-wider">
+                          {lang === "sk" ? "Neboli nahrané žiadne fotografie" : "No photos uploaded yet"}
+                        </p>
+                        <p>
+                          {lang === "sk" ? "Pre odoslanie prihlášky nahrajte aspoň 1 fotografiu." : "Please upload at least 1 photo to submit."}
+                        </p>
+                      </div>
+                    ) : invalidPhotos.length === 0 ? (
+                      <div className="p-4 bg-green-50 border border-green-200 text-green-700 text-xs flex items-center gap-2">
+                        <CheckCircle2 size={16} />
+                        {lang === "sk" ? "Všetky príbehy k fotografiám vyhovujú požiadavkám." : "All photo descriptions meet the requirements."}
+                      </div>
+                    ) : (
+                      invalidPhotos.map(({ idx, photo, catName, minDesc, maxDesc, descRequired }) => (
+                        <div key={idx} className="p-4 border border-red-200 bg-red-50/30 space-y-3">
+                          <div className="flex items-center gap-3">
+                            <img src={photo.previewUrl} className="w-12 h-12 object-cover border border-border shrink-0" alt="Thumbnail" />
+                            <div>
+                              <p className="text-xs font-bold text-ink">{photo.name || photo.file?.name}</p>
+                              <p className="text-[10px] text-muted uppercase tracking-wider">
+                                {lang === "sk" ? "Kategória:" : "Category:"} {catName} ({lang === "sk" ? `min. ${minDesc}, max. ${maxDesc} znakov` : `min. ${minDesc}, max. ${maxDesc} chars`})
+                              </p>
+                            </div>
+                          </div>
+                          <div>
+                            <textarea 
+                              value={photo.description}
+                              onChange={(e) => updatePhotoInfo(idx, { description: e.target.value })}
+                              placeholder={lang === "sk" ? "Napíšte príbeh / popis k fotografii..." : "Write story / description for the photo..."}
+                              className="w-full text-xs bg-white border border-border p-2.5 h-20 outline-none focus:border-accent resize-none"
+                            />
+                            <div className="flex justify-between items-center mt-1 text-[9px]">
+                              <span className={cn("font-bold uppercase", (photo.description.length < minDesc || photo.description.length > maxDesc) ? "text-red-600" : "text-green-600")}>
+                                {lang === "sk" ? "Dĺžka:" : "Length:"} {photo.description.length} / {maxDesc} {lang === "sk" ? "znakov" : "chars"} {minDesc > 0 && `(min. ${minDesc})`}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+
+                {wizardStep === "consents" && (
+                  <div className="space-y-4">
+                    {missingConsents.length === 0 ? (
+                      <div className="p-4 bg-green-50 border border-green-200 text-green-700 text-xs flex items-center gap-2">
+                        <CheckCircle2 size={16} />
+                        {lang === "sk" ? "Všetky súhlasy sú potvrdené." : "All consents are agreed."}
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {!formData.gdprConsent && (
+                          <div className="flex items-start gap-3 p-3.5 border border-border bg-paper/30">
+                            <input 
+                              type="checkbox"
+                              id="wiz-gdpr"
+                              checked={formData.gdprConsent}
+                              onChange={(e) => setFormData({ ...formData, gdprConsent: e.target.checked })}
+                              className="mt-0.5 w-4 h-4 accent-accent cursor-pointer shrink-0"
+                            />
+                            <label htmlFor="wiz-gdpr" className="text-xs text-ink cursor-pointer select-none leading-relaxed">
+                              {t.consentText}
+                            </label>
+                          </div>
+                        )}
+                        {!formData.rulesConsent && (
+                          <div className="flex items-start gap-3 p-3.5 border border-border bg-paper/30">
+                            <input 
+                              type="checkbox"
+                              id="wiz-rules"
+                              checked={formData.rulesConsent}
+                              onChange={(e) => setFormData({ ...formData, rulesConsent: e.target.checked })}
+                              className="mt-0.5 w-4 h-4 accent-accent cursor-pointer shrink-0"
+                            />
+                            <label htmlFor="wiz-rules" className="text-xs text-ink cursor-pointer select-none leading-relaxed">
+                              {lang === "sk" 
+                                ? "Čestne vyhlasujem, že som autorom zaslaných diel a súhlasím s podmienkami súťaže."
+                                : "I solemnly declare that I am the author of the submitted works and I agree with the competition conditions."}
+                            </label>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Wizard Footer Controls */}
+              <div className="pt-4 border-t border-border flex items-center justify-between gap-3">
+                <button 
+                  onClick={() => setShowWizard(false)}
+                  className="px-5 py-2.5 text-[11px] font-bold uppercase tracking-wider text-muted hover:text-ink transition-colors"
+                >
+                  {lang === "sk" ? "Upraviť vo formulári" : "Edit in form"}
+                </button>
+                <div className="flex items-center gap-2">
+                  {wizardStep !== "consents" ? (
+                    <button 
+                      onClick={() => setWizardStep(wizardStep === "author" ? "photos" : "consents")}
+                      className="px-6 py-2.5 bg-ink text-white text-[11px] font-bold uppercase tracking-wider hover:opacity-90 transition-opacity"
+                    >
+                      {lang === "sk" ? "Ďalší krok ->" : "Next step ->"}
+                    </button>
+                  ) : (
+                    <button 
+                      onClick={() => {
+                        setShowWizard(false);
+                        handleSubmit();
+                      }}
+                      disabled={missingAuthorFields.length > 0 || invalidPhotos.length > 0 || missingConsents.length > 0 || photos.length === 0}
+                      className="px-8 py-2.5 bg-accent text-white text-[11px] font-bold uppercase tracking-wider hover:opacity-90 transition-opacity disabled:opacity-50"
+                    >
+                      {lang === "sk" ? "Dokončiť & Odoslať" : "Complete & Submit"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Detailed Error Modal Backup */}
+      <AnimatePresence>
+        {validationErrors.length > 0 && !showWizard && (
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -394,7 +697,7 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white border-2 border-red-500 p-8 max-w-md w-full space-y-6"
+              className="bg-white border-2 border-red-500 p-8 max-w-md w-full space-y-6 shadow-2xl"
             >
               <div className="flex items-center gap-3 text-red-500 pb-2 border-b border-border">
                 <AlertTriangle size={24} />
@@ -408,12 +711,23 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
                   </li>
                 ))}
               </ul>
-              <button 
-                onClick={() => setValidationErrors([])}
-                className="w-full py-3 bg-paper border border-border text-[10px] font-bold uppercase tracking-widest hover:border-ink transition-all"
-              >
-                {lang === "sk" ? "Rozumiem" : "I Understand"}
-              </button>
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => {
+                    setValidationErrors([]);
+                    setShowWizard(true);
+                  }}
+                  className="flex-1 py-3 bg-accent text-white text-[10px] font-bold uppercase tracking-widest hover:opacity-90 transition-all"
+                >
+                  {lang === "sk" ? "Otvoriť Sprievodcu" : "Open Wizard"}
+                </button>
+                <button 
+                  onClick={() => setValidationErrors([])}
+                  className="px-4 py-3 bg-paper border border-border text-[10px] font-bold uppercase tracking-widest hover:border-ink transition-all"
+                >
+                  {lang === "sk" ? "Zavrieť" : "Close"}
+                </button>
+              </div>
             </motion.div>
           </motion.div>
         )}

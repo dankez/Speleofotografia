@@ -11,6 +11,7 @@ A web application for managing an international caving photography competition.
 - **Registračný formulár**: Dvojjazyčné rozhranie (SK/EN) pre autorov na nahranie fotografií do dvoch kategórií (A a B).
 - **Overovanie dát**: Automatická kontrola formátu e-mailu, Instagramu a povinných polí.
 - **Limit fotografií**: Dynamicky nastaviteľný limit počtu fotiek na jednu kategóriu (predvolene 5).
+- **Sprievodca dokončením prihlášky (Interactive Completion Wizard)**: Ak autor zabudne vyplniť povinné polia, pridať príspevok alebo upraviť popis k fotke podľa pravidiel kategórie, pri pokuse o odoslanie ho interaktívny sprievodca prehľadne prevedie jednotlivými krokmi (1. Autor, 2. Príbehy fotiek, 3. Súhlasy) na doplnenie potrebných údajov.
 - **Potvrdenie e-mailom**: Automatické odoslanie e-mailu autorovi po úspešnom prihlásení s použitím SMTP servera.
 - **Hromadné nahranie**: Možnosť vybrať a nahrať viacero súborov naraz s náhľadmi a popismi.
 - **Súhlasy (GDPR & Pravidlá)**: Povinné zaškrtávacie polia pre súhlas so spracovaním údajov a pravidlami súťaže s odkazom na detailné podmienky.

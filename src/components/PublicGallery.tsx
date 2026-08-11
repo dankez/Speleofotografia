@@ -107,7 +107,7 @@ export default function PublicGallery({ lang, isIframe = false }: { lang: Lang, 
     e.stopPropagation();
     if (votedIds.includes(photoId)) return;
 
-    const turnstileEnabled = settings?.turnstileEnabled !== false && settings?.turnstileEnabled !== 'false';
+    const turnstileEnabled = Boolean(settings?.turnstileEnabled);
     if (!turnstileEnabled) {
       submitVote(photoId, "");
     } else {
