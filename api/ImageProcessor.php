@@ -83,11 +83,68 @@ class ImageProcessor {
         return true;
     }
 
-    private static function createFromType($path, $type) {
+    public static function rotateFile($filePath, $angle = 90) {
+        if (!file_exists($filePath)) return false;
+        $info = @getimagesize($filePath);
+        if (!$info) return false;
+        [$w, $h, $type] = $info;
+        
+        $src = self::createFromType($filePath, $type, false); // Don't auto-exif rotate when explicitly rotating
+        if (!$src) return false;
+
+        // GD imagerotate uses counter-clockwise angle, so we negate for clockwise rotation
+        $rotated = imagerotate($src, -$angle, 0);
+        imagedestroy($src);
+        if (!$rotated) return false;
+
+        self::ensureDir(dirname($filePath));
+        $ok = false;
+        if ($type === IMAGETYPE_JPEG) {
+            $ok = imagejpeg($rotated, $filePath, 92);
+        } else if ($type === IMAGETYPE_WEBP) {
+            $ok = imagewebp($rotated, $filePath, 85);
+        } else if ($type === IMAGETYPE_PNG) {
+            $ok = imagepng($rotated, $filePath, 8);
+        }
+        imagedestroy($rotated);
+        return $ok;
+    }
+
+    public static function detectExifOrientation($filePath) {
+        if (!file_exists($filePath) || !function_exists('exif_read_data')) return 1;
+        $exif = @exif_read_data($filePath);
+        return !empty($exif['Orientation']) ? (int)$exif['Orientation'] : 1;
+    }
+
+    private static function createFromType($path, $type, $applyExif = true) {
         switch ($type) {
-            case IMAGETYPE_JPEG: return imagecreatefromjpeg($path);
-            case IMAGETYPE_PNG:  return imagecreatefrompng($path);
-            case IMAGETYPE_WEBP: return imagecreatefromwebp($path);
+            case IMAGETYPE_JPEG: {
+                $img = @imagecreatefromjpeg($path);
+                if ($img && $applyExif && function_exists('exif_read_data')) {
+                    $exif = @exif_read_data($path);
+                    if (!empty($exif['Orientation'])) {
+                        $orientation = (int)$exif['Orientation'];
+                        if ($orientation === 3) {
+                            $rotated = imagerotate($img, 180, 0);
+                            imagedestroy($img);
+                            $img = $rotated;
+                        } elseif ($orientation === 6) {
+                            // 90 CW
+                            $rotated = imagerotate($img, -90, 0);
+                            imagedestroy($img);
+                            $img = $rotated;
+                        } elseif ($orientation === 8) {
+                            // 90 CCW
+                            $rotated = imagerotate($img, 90, 0);
+                            imagedestroy($img);
+                            $img = $rotated;
+                        }
+                    }
+                }
+                return $img;
+            }
+            case IMAGETYPE_PNG:  return @imagecreatefrompng($path);
+            case IMAGETYPE_WEBP: return @imagecreatefromwebp($path);
             default: return false;
         }
     }

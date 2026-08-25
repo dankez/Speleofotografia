@@ -1652,6 +1652,94 @@ if ($path === '/admin/photos/bulk-download' && $method === 'POST') {
 }
 
 // ============================================================
+// === ADMIN: OTOČENIE FOTOGRAFIE O 90 / 180 / 270 STUPŇOV
+// ============================================================
+if ($path === '/admin/photos/rotate' && $method === 'POST') {
+    require_once 'ImageProcessor.php';
+    $data = json_input();
+    $id = $data['id'] ?? '';
+    $angle = (int)($data['angle'] ?? 90);
+    if (!in_array($angle, [90, 180, 270, -90, -180, -270])) {
+        $angle = 90;
+    }
+
+    if (empty($id)) {
+        send_json(['error' => 'Chýbajúce ID fotografie'], 400);
+    }
+
+    $photos = read_registrations();
+    $target = null;
+    foreach ($photos as $p) {
+        if ($p['id'] === $id) {
+            $target = $p;
+            break;
+        }
+    }
+
+    if (!$target) {
+        send_json(['error' => 'Fotografia nenájdená'], 404);
+    }
+
+    $rotatedAny = false;
+
+    // 1. Otoč web verziu (WebP)
+    if (!empty($target['webPath'])) {
+        $webFile = UPLOADS_DIR . '/' . $target['webPath'];
+        if (file_exists($webFile)) {
+            ImageProcessor::rotateFile($webFile, $angle);
+            $rotatedAny = true;
+        }
+    }
+
+    // 2. Otoč originál (JPEG)
+    if (!empty($target['originalPath'])) {
+        $origFile = ORIGINALS_DIR . '/' . $target['originalPath'];
+        if (file_exists($origFile)) {
+            ImageProcessor::rotateFile($origFile, $angle);
+            $rotatedAny = true;
+        }
+    }
+
+    dlog("ROTATE PHOTO: id=$id, angle=$angle, ok=" . ($rotatedAny ? '1' : '0'));
+    send_json(['success' => $rotatedAny, 'id' => $id, 'angle' => $angle]);
+}
+
+// ============================================================
+// === ADMIN: HROMADNÁ OPRAVA ORIENTÁCIE (EXIF AUTO-FIX)
+// ============================================================
+if ($path === '/admin/photos/fix-orientations' && $method === 'POST') {
+    require_once 'ImageProcessor.php';
+    $photos = read_registrations();
+    $fixedCount = 0;
+
+    foreach ($photos as $p) {
+        $origFile = !empty($p['originalPath']) ? ORIGINALS_DIR . '/' . $p['originalPath'] : '';
+        $webFile = !empty($p['webPath']) ? UPLOADS_DIR . '/' . $p['webPath'] : '';
+
+        if ($origFile && file_exists($origFile)) {
+            $orientation = ImageProcessor::detectExifOrientation($origFile);
+            if (in_array($orientation, [3, 6, 8])) {
+                $angle = 0;
+                if ($orientation === 3) $angle = 180;
+                elseif ($orientation === 6) $angle = 90;
+                elseif ($orientation === 8) $angle = 270;
+
+                if ($angle > 0) {
+                    ImageProcessor::rotateFile($origFile, $angle);
+                    if ($webFile && file_exists($webFile)) {
+                        ImageProcessor::rotateFile($webFile, $angle);
+                    }
+                    $fixedCount++;
+                    dlog("EXIF AUTO-FIX: id={$p['id']}, orientation=$orientation -> rotated $angle deg");
+                }
+            }
+        }
+    }
+
+    send_json(['success' => true, 'fixedCount' => $fixedCount]);
+}
+
+// ============================================================
 // === ADMIN: KOMPLETNÁ ZÁLOHA DÁT A NASTAVENÍ (ZIP)
 // ============================================================
 if ($path === '/admin/export/backup-data' && $method === 'GET') {

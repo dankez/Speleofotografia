@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, ChangeEvent } from "react";
-import { BarChart3, Users, Image as ImageIcon, Link as LinkIcon, Plus, Copy, Check, Download, Trash2, Eye, Shield, Settings as SettingsIcon, Mail, UserPlus, Heart, Code, ExternalLink, X, User, LayoutGrid, List, Search, Edit2, TrendingUp, Activity, FileText, Zap, Upload, AlertTriangle, Sparkles } from "lucide-react";
+import { BarChart3, Users, Image as ImageIcon, Link as LinkIcon, Plus, Copy, Check, Download, Trash2, Eye, Shield, Settings as SettingsIcon, Mail, UserPlus, Heart, Code, ExternalLink, X, User, LayoutGrid, List, Search, Edit2, TrendingUp, Activity, FileText, Zap, Upload, AlertTriangle, Sparkles, RotateCw, ArrowUpDown, ArrowUp, ArrowDown, Clock } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/src/lib/utils";
 import type { Photo, Evaluator } from "../types";
@@ -225,6 +225,10 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
   const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null);
   const [galleryView, setGalleryView] = useState<"grid" | "table">("table");
   const [searchQuery, setSearchQuery] = useState("");
+  const [sortField, setSortField] = useState<"createdAt" | "name" | "author" | "category" | "score" | "votes" | "shortlisted">("createdAt");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const [rotatingPhotoId, setRotatingPhotoId] = useState<string | null>(null);
+  const [fixingOrientations, setFixingOrientations] = useState<boolean>(false);
   const [editingPhoto, setEditingPhoto] = useState<Photo | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
   const [commModal, setCommModal] = useState<{ open: boolean; email: string; photoId: string }>({ open: false, email: "", photoId: "" });
@@ -242,6 +246,52 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   
+  const handleSort = (field: "createdAt" | "name" | "author" | "category" | "score" | "votes" | "shortlisted") => {
+    if (sortField === field) {
+      setSortDirection(prev => prev === "asc" ? "desc" : "asc");
+    } else {
+      setSortField(field);
+      setSortDirection(field === "createdAt" || field === "score" || field === "votes" ? "desc" : "asc");
+    }
+  };
+
+  const rotatePhoto = async (id: string, angle = 90) => {
+    try {
+      setRotatingPhotoId(id);
+      const res = await fetchWithAuth("/api/admin/photos/rotate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, angle })
+      });
+      if (res.ok) {
+        fetchData();
+      }
+    } catch (e) {
+      console.error("Rotate error", e);
+    } finally {
+      setRotatingPhotoId(null);
+    }
+  };
+
+  const fixExifOrientations = async () => {
+    if (!confirm(lang === "sk" ? "Spustiť automatickú detekciu a opravu otočenia všetkých fotiek podľa EXIF dát?" : "Run automatic EXIF orientation detection and fix for all photos?")) return;
+    try {
+      setFixingOrientations(true);
+      const res = await fetchWithAuth("/api/admin/photos/fix-orientations", {
+        method: "POST"
+      });
+      if (res.ok) {
+        const data = await res.json();
+        alert(lang === "sk" ? `Opravených ${data.fixedCount || 0} fotografií.` : `Fixed ${data.fixedCount || 0} photos.`);
+        fetchData();
+      }
+    } catch (e) {
+      console.error("Fix orientations error", e);
+    } finally {
+      setFixingOrientations(false);
+    }
+  };
+
   const fetchWithAuth = async (url: string, options: RequestInit = {}) => {
     const token = localStorage.getItem("speleofoto_token");
     const headers = {
@@ -261,8 +311,6 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
     }
   };
   
-  
-  
   const filteredPhotos = useMemo(() => {
     return photos
       .filter(p => {
@@ -274,12 +322,34 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
         return matchesSearch && matchesCategory;
       })
       .sort((a, b) => {
-        if (galleryView === "table") {
-          return (b.averageScore || 0) - (a.averageScore || 0);
+        let diff = 0;
+        switch (sortField) {
+          case "name":
+            diff = (a.name || "").localeCompare(b.name || "", undefined, { sensitivity: "base" });
+            break;
+          case "author":
+            diff = (a.author || "").localeCompare(b.author || "", undefined, { sensitivity: "base" });
+            break;
+          case "category":
+            diff = (a.category || "").localeCompare(b.category || "");
+            break;
+          case "score":
+            diff = ((a as any).averageScore || 0) - ((b as any).averageScore || 0);
+            break;
+          case "votes":
+            diff = ((a as any).voteCount || 0) - ((b as any).voteCount || 0);
+            break;
+          case "shortlisted":
+            diff = (a.shortlisted ? 1 : 0) - (b.shortlisted ? 1 : 0);
+            break;
+          case "createdAt":
+          default:
+            diff = new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime();
+            break;
         }
-        return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+        return sortDirection === "asc" ? diff : -diff;
       });
-  }, [photos, photoFilter, searchQuery, galleryView]);
+  }, [photos, photoFilter, searchQuery, sortField, sortDirection]);
 
   // Štatistika podľa kategórií (počet fotiek, autorov, popisy, priemerné body)
   const categoryStats = useMemo(() => {
@@ -2637,7 +2707,17 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                 />
               </div>
 
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={fixExifOrientations}
+                  disabled={fixingOrientations}
+                  className="px-3 py-2 border border-border bg-white text-ink text-[10px] font-bold uppercase tracking-widest hover:border-ink transition-all flex items-center gap-1.5 disabled:opacity-50"
+                  title={lang === "sk" ? "Automatická oprava otočenia fotiek podľa EXIF metadát" : "Auto-fix photo orientation via EXIF"}
+                >
+                  <RotateCw size={13} className={cn(fixingOrientations && "animate-spin")} />
+                  {fixingOrientations ? (lang === "sk" ? "Opravujem..." : "Fixing...") : (lang === "sk" ? "Opraviť EXIF" : "Fix EXIF")}
+                </button>
+
                 <div className="flex border border-border">
                   <button 
                     onClick={() => setGalleryView("grid")}
@@ -2742,7 +2822,15 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                     <div className="absolute bottom-11 left-2 px-1.5 py-0.5 bg-ink/60 text-white text-[7px] font-bold uppercase tracking-widest backdrop-blur-sm">
                       {(settings?.categories || []).find(c => c.id === photo.category)?.[lang === "sk" ? "nameSk" : "nameEn"] || photo.category}
                     </div>
-                    <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-20">
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); rotatePhoto(photo.id, 90); }}
+                        disabled={rotatingPhotoId === photo.id}
+                        className="p-2 bg-white/80 text-ink hover:bg-white transition-colors"
+                        title={lang === "sk" ? "Otočiť o 90°" : "Rotate 90°"}
+                      >
+                        <RotateCw size={12} className={cn(rotatingPhotoId === photo.id && "animate-spin")} />
+                      </button>
                       <button 
                         onClick={(e) => { e.stopPropagation(); setEditingPhoto(photo); }}
                         className="p-2 bg-white/80 text-ink hover:bg-white"
@@ -2771,7 +2859,7 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                 ))}
               </div>
             ) : (
-              <div className="border border-border bg-white overflow-x-auto">
+              <div className="border border-border bg-white overflow-x-auto shadow-sm">
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="bg-paper border-b border-border">
@@ -2786,94 +2874,227 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                           {selectedPhotos.length === filteredPhotos.length && filteredPhotos.length > 0 && <Check size={12} strokeWidth={4} />}
                         </div>
                       </th>
-                      <th className="p-4 text-[9px] font-bold uppercase tracking-widest text-muted w-20">{lang === "sk" ? "Foto" : "Photo"}</th>
-                      <th className="p-4 text-[9px] font-bold uppercase tracking-widest text-muted">{lang === "sk" ? "Dielo / Autor" : "Piece / Author"}</th>
-                      <th className="p-4 text-[9px] font-bold uppercase tracking-widest text-muted">{lang === "sk" ? "Krátky list" : "Shortlist"}</th>
-                      <th className="p-4 text-[9px] font-bold uppercase tracking-widest text-muted">{lang === "sk" ? "Bodovanie" : "Scoring"}</th>
+                      <th className="p-4 text-[9px] font-bold uppercase tracking-widest text-muted w-16">{lang === "sk" ? "Foto" : "Photo"}</th>
+                      
+                      {/* Dielo & Autor */}
+                      <th 
+                        onClick={() => handleSort("name")}
+                        className="p-4 text-[9px] font-bold uppercase tracking-widest text-muted cursor-pointer hover:text-ink transition-colors select-none"
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <span>{lang === "sk" ? "Dielo / Autor" : "Piece / Author"}</span>
+                          {sortField === "name" || sortField === "author" ? (
+                            sortDirection === "asc" ? <ArrowUp size={12} className="text-ink" /> : <ArrowDown size={12} className="text-ink" />
+                          ) : (
+                            <ArrowUpDown size={11} className="text-muted/40 hover:text-muted" />
+                          )}
+                        </div>
+                      </th>
+
+                      {/* Kategória */}
+                      <th 
+                        onClick={() => handleSort("category")}
+                        className="p-4 text-[9px] font-bold uppercase tracking-widest text-muted cursor-pointer hover:text-ink transition-colors select-none"
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <span>{lang === "sk" ? "Kategória" : "Category"}</span>
+                          {sortField === "category" ? (
+                            sortDirection === "asc" ? <ArrowUp size={12} className="text-ink" /> : <ArrowDown size={12} className="text-ink" />
+                          ) : (
+                            <ArrowUpDown size={11} className="text-muted/40 hover:text-muted" />
+                          )}
+                        </div>
+                      </th>
+
+                      {/* Dátum nahratia */}
+                      <th 
+                        onClick={() => handleSort("createdAt")}
+                        className="p-4 text-[9px] font-bold uppercase tracking-widest text-muted cursor-pointer hover:text-ink transition-colors select-none"
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <Clock size={11} className="text-muted" />
+                          <span>{lang === "sk" ? "Dátum nahratia" : "Upload Date"}</span>
+                          {sortField === "createdAt" ? (
+                            sortDirection === "asc" ? <ArrowUp size={12} className="text-ink" /> : <ArrowDown size={12} className="text-ink" />
+                          ) : (
+                            <ArrowUpDown size={11} className="text-muted/40 hover:text-muted" />
+                          )}
+                        </div>
+                      </th>
+
+                      {/* Krátky list */}
+                      <th 
+                        onClick={() => handleSort("shortlisted")}
+                        className="p-4 text-[9px] font-bold uppercase tracking-widest text-muted cursor-pointer hover:text-ink transition-colors select-none"
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <span>{lang === "sk" ? "Krátky list" : "Shortlist"}</span>
+                          {sortField === "shortlisted" ? (
+                            sortDirection === "asc" ? <ArrowUp size={12} className="text-ink" /> : <ArrowDown size={12} className="text-ink" />
+                          ) : (
+                            <ArrowUpDown size={11} className="text-muted/40 hover:text-muted" />
+                          )}
+                        </div>
+                      </th>
+
+                      {/* Bodovanie */}
+                      <th 
+                        onClick={() => handleSort("score")}
+                        className="p-4 text-[9px] font-bold uppercase tracking-widest text-muted cursor-pointer hover:text-ink transition-colors select-none"
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <span>{lang === "sk" ? "Bodovanie" : "Scoring"}</span>
+                          {sortField === "score" ? (
+                            sortDirection === "asc" ? <ArrowUp size={12} className="text-ink" /> : <ArrowDown size={12} className="text-ink" />
+                          ) : (
+                            <ArrowUpDown size={11} className="text-muted/40 hover:text-muted" />
+                          )}
+                        </div>
+                      </th>
+
+                      {/* Hlasy */}
+                      <th 
+                        onClick={() => handleSort("votes")}
+                        className="p-4 text-[9px] font-bold uppercase tracking-widest text-muted cursor-pointer hover:text-ink transition-colors select-none"
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <span>{lang === "sk" ? "Hlasy" : "Votes"}</span>
+                          {sortField === "votes" ? (
+                            sortDirection === "asc" ? <ArrowUp size={12} className="text-ink" /> : <ArrowDown size={12} className="text-ink" />
+                          ) : (
+                            <ArrowUpDown size={11} className="text-muted/40 hover:text-muted" />
+                          )}
+                        </div>
+                      </th>
+
                       <th className="p-4 text-[9px] font-bold uppercase tracking-widest text-muted text-right">{lang === "sk" ? "Akcie" : "Actions"}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
-                    {filteredPhotos.map(photo => (
-                      <tr key={photo.id} className={cn("hover:bg-paper/50 transition-colors group", photo.shortlisted && "bg-accent/5", selectedPhotos.includes(photo.id) && "bg-ink/5")}>
-                        <td className="p-4">
-                          <div 
-                            onClick={() => toggleSelectPhoto(photo.id)}
-                            className={cn(
-                              "w-4 h-4 border-2 cursor-pointer flex items-center justify-center transition-all",
-                              selectedPhotos.includes(photo.id) ? "bg-ink border-ink text-white" : "bg-white border-border hover:border-ink"
-                            )}
-                          >
-                            {selectedPhotos.includes(photo.id) && <Check size={12} strokeWidth={4} />}
-                          </div>
-                        </td>
-                        <td className="p-4">
-                          <div className="w-12 h-12 bg-paper border border-border overflow-hidden cursor-pointer" onClick={() => setSelectedPhoto(photo)}>
-                            <img src={`/uploads/${photo.webPath || photo.path}`} className="w-full h-full object-cover" alt="" loading="lazy" />
-                          </div>
-                        </td>
-                        <td className="p-4">
-                           <div className="space-y-1">
-                            <div className="flex items-center gap-2">
-                              <p className="text-xs font-bold tracking-tight text-ink">{photo.name}</p>
-                              {photo.originalExists === false && (
-                                <span className="px-1.5 py-0.5 bg-paper border border-border text-[8px] font-bold text-muted uppercase tracking-tighter">Archivované</span>
+                    {filteredPhotos.map(photo => {
+                      const dateDisplay = (() => {
+                        if (!photo.createdAt) return "-";
+                        try {
+                          const d = new Date(photo.createdAt);
+                          if (isNaN(d.getTime())) return (photo.createdAt || "").substring(0, 16);
+                          const day = String(d.getDate()).padStart(2, '0');
+                          const month = String(d.getMonth() + 1).padStart(2, '0');
+                          const year = d.getFullYear();
+                          const hours = String(d.getHours()).padStart(2, '0');
+                          const mins = String(d.getMinutes()).padStart(2, '0');
+                          return `${day}.${month}.${year} ${hours}:${mins}`;
+                        } catch {
+                          return (photo.createdAt || "").substring(0, 16);
+                        }
+                      })();
+
+                      return (
+                        <tr key={photo.id} className={cn("hover:bg-paper/50 transition-colors group", photo.shortlisted && "bg-accent/5", selectedPhotos.includes(photo.id) && "bg-ink/5")}>
+                          <td className="p-4">
+                            <div 
+                              onClick={() => toggleSelectPhoto(photo.id)}
+                              className={cn(
+                                "w-4 h-4 border-2 cursor-pointer flex items-center justify-center transition-all",
+                                selectedPhotos.includes(photo.id) ? "bg-ink border-ink text-white" : "bg-white border-border hover:border-ink"
                               )}
+                            >
+                              {selectedPhotos.includes(photo.id) && <Check size={12} strokeWidth={4} />}
                             </div>
-                            <p className="text-[10px] text-muted font-bold uppercase tracking-tight">{photo.author}</p>
-                          </div>
-                        </td>
-                        <td className="p-4">
-                           <button 
-                            onClick={() => toggleShortlist(photo.id, photo.shortlisted || false)}
-                            className={cn(
-                              "px-2 py-1 text-[9px] font-extrabold uppercase tracking-widest border transition-all",
-                              photo.shortlisted ? "bg-accent text-white border-accent" : "text-muted border-border hover:border-ink hover:text-ink"
-                            )}
-                           >
-                            {photo.shortlisted ? "SHORTLISTED" : "OFF"}
-                           </button>
-                        </td>
-                        <td className="p-4">
-                           <div className="flex items-center gap-2">
-                             <span className="text-sm font-light text-ink">{photo.averageScore || 0}</span>
-                             <span className="text-[8px] text-muted font-bold uppercase">avg</span>
-                           </div>
-                        </td>
-                        <td className="p-4">
-                          <div className="flex justify-end gap-1">
-                            <button 
-                              onClick={() => setCommModal({ open: true, email: photo.email, photoId: photo.id })}
-                              className="p-2 text-muted hover:text-accent transition-colors"
-                              title={lang === "sk" ? "Kontaktovať autora" : "Contact Author"}
-                            >
-                              <Mail size={14} />
-                            </button>
-                            <button 
-                              onClick={() => setSelectedPhoto(photo)}
-                              className="p-2 text-muted hover:text-ink transition-colors"
-                              title={lang === "sk" ? "Zobraziť" : "View"}
-                            >
-                              <Eye size={14} />
-                            </button>
-                            <button 
-                              onClick={() => setEditingPhoto(photo)}
-                              className="p-2 text-muted hover:text-ink transition-colors"
-                              title={lang === "sk" ? "Upraviť" : "Edit"}
-                            >
-                              <Edit2 size={14} />
-                            </button>
-                            <button 
-                              onClick={() => deletePhoto(photo.id)}
-                              className="p-2 text-muted hover:text-red-500 transition-colors"
-                              title={lang === "sk" ? "Zmazať" : "Delete"}
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                          </td>
+                          <td className="p-4">
+                            <div className="w-12 h-12 bg-paper border border-border overflow-hidden cursor-pointer relative group/img" onClick={() => setSelectedPhoto(photo)}>
+                              <img src={`/uploads/${photo.webPath || photo.path}`} className="w-full h-full object-cover" alt="" loading="lazy" />
+                              <div className="absolute inset-0 bg-ink/40 opacity-0 group-hover/img:opacity-100 flex items-center justify-center transition-opacity">
+                                <Eye size={14} className="text-white" />
+                              </div>
+                            </div>
+                          </td>
+                          <td className="p-4">
+                             <div className="space-y-0.5">
+                              <div className="flex items-center gap-2">
+                                <p className="text-xs font-bold tracking-tight text-ink">{photo.name}</p>
+                                {photo.originalExists === false && (
+                                  <span className="px-1.5 py-0.5 bg-paper border border-border text-[8px] font-bold text-muted uppercase tracking-tighter">Archivované</span>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-muted font-bold uppercase tracking-tight">{photo.author}</p>
+                            </div>
+                          </td>
+                          <td className="p-4">
+                            <span className="inline-block px-2 py-0.5 bg-paper border border-border text-[9px] font-bold uppercase tracking-widest text-ink rounded-xs">
+                              {photo.category ? `Kat. ${photo.category}` : "-"}
+                            </span>
+                          </td>
+                          <td className="p-4">
+                            <span className="text-[10px] font-mono text-muted font-medium">
+                              {dateDisplay}
+                            </span>
+                          </td>
+                          <td className="p-4">
+                             <button 
+                              onClick={() => toggleShortlist(photo.id, photo.shortlisted || false)}
+                              className={cn(
+                                "px-2 py-1 text-[9px] font-extrabold uppercase tracking-widest border transition-all",
+                                photo.shortlisted ? "bg-accent text-white border-accent" : "text-muted border-border hover:border-ink hover:text-ink"
+                              )}
+                             >
+                              {photo.shortlisted ? "SHORTLISTED" : "OFF"}
+                             </button>
+                          </td>
+                          <td className="p-4">
+                             <div className="flex items-center gap-1.5">
+                               <span className="text-sm font-light text-ink">{photo.averageScore || 0}</span>
+                               <span className="text-[8px] text-muted font-bold uppercase">avg ({(photo as any).scoreCount || 0}x)</span>
+                             </div>
+                          </td>
+                          <td className="p-4">
+                             <span className="text-xs font-bold text-accent">
+                               {photo.voteCount || 0}
+                             </span>
+                          </td>
+                          <td className="p-4">
+                            <div className="flex justify-end gap-1">
+                              <button 
+                                onClick={() => rotatePhoto(photo.id, 90)}
+                                disabled={rotatingPhotoId === photo.id}
+                                className="p-2 text-muted hover:text-ink transition-colors"
+                                title={lang === "sk" ? "Otočiť o 90° vpravo" : "Rotate 90° CW"}
+                              >
+                                <RotateCw size={14} className={cn(rotatingPhotoId === photo.id && "animate-spin text-accent")} />
+                              </button>
+                              <button 
+                                onClick={() => setCommModal({ open: true, email: photo.email, photoId: photo.id })}
+                                className="p-2 text-muted hover:text-accent transition-colors"
+                                title={lang === "sk" ? "Kontaktovať autora" : "Contact Author"}
+                              >
+                                <Mail size={14} />
+                              </button>
+                              <button 
+                                onClick={() => setSelectedPhoto(photo)}
+                                className="p-2 text-muted hover:text-ink transition-colors"
+                                title={lang === "sk" ? "Zobraziť" : "View"}
+                              >
+                                <Eye size={14} />
+                              </button>
+                              <button 
+                                onClick={() => setEditingPhoto(photo)}
+                                className="p-2 text-muted hover:text-ink transition-colors"
+                                title={lang === "sk" ? "Upraviť" : "Edit"}
+                              >
+                                <Edit2 size={14} />
+                              </button>
+                              <button 
+                                onClick={() => deletePhoto(photo.id)}
+                                className="p-2 text-muted hover:text-red-500 transition-colors"
+                                title={lang === "sk" ? "Zmazať" : "Delete"}
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
