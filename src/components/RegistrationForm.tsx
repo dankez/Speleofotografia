@@ -237,9 +237,67 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
     });
   };
 
+  // Wizard state for interactive completion modal
+  const [showWizard, setShowWizard] = useState(false);
+  const [wizardStep, setWizardStep] = useState<"author" | "photos" | "consents">("author");
+
+  const missingAuthorFields = useMemo(() => {
+    const list: { id: string; label: string; type: string; placeholder: string; isMissing: boolean }[] = [];
+    const req = settings?.fieldRequirements;
+    if (req?.author && !isValid.author) {
+      list.push({ id: "author", label: lang === "sk" ? "Meno a priezvisko autor (min. 3 znaky)" : "Full Name (min. 3 chars)", type: "text", placeholder: "napr. Ján Slovák", isMissing: true });
+    }
+    if (req?.email && !isValid.email) {
+      list.push({ id: "email", label: lang === "sk" ? "Platná e-mailová adresa" : "Valid Email Address", type: "email", placeholder: "email@example.sk", isMissing: true });
+    }
+    if (req?.address && !isValid.address) {
+      list.push({ id: "address", label: lang === "sk" ? "Korešpondenčná adresa (min. 5 znakov)" : "Address (min. 5 chars)", type: "text", placeholder: "Ulica, PSČ, Mesto, Štát", isMissing: true });
+    }
+    if (req?.instagram && !isValid.instagram) {
+      list.push({ id: "instagram", label: lang === "sk" ? "Instagram účet (začínajúci @)" : "Instagram handle (starting with @)", type: "text", placeholder: "@meno", isMissing: true });
+    }
+    return list;
+  }, [settings, isValid, lang]);
+
+  const invalidPhotos = useMemo(() => {
+    return photos.map((p, idx) => {
+      const catSet = settings?.categories?.find(c => c.id === p.category);
+      const pMin = catSet?.minDesc || 0;
+      const pMax = catSet?.maxDesc || 5000;
+      const pReq = catSet?.descRequired;
+      const len = p.description ? p.description.length : 0;
+      const isMissing = Boolean((pReq && len === 0) || len < pMin || len > pMax);
+      return {
+        idx,
+        photo: p,
+        catName: lang === "sk" ? catSet?.nameSk || p.category : catSet?.nameEn || p.category,
+        minDesc: pMin,
+        maxDesc: pMax,
+        descRequired: pReq,
+        isMissing
+      };
+    }).filter(item => item.isMissing);
+  }, [photos, settings, lang]);
+
+  const missingConsents = useMemo(() => {
+    const list: string[] = [];
+    if (!formData.gdprConsent) list.push(lang === "sk" ? "Súhlas so spracovaním údajov (GDPR)" : "GDPR Consent");
+    if (!formData.rulesConsent) list.push(lang === "sk" ? "Súhlas s pravidlami a vyhlásenie autorstva" : "Agreement with rules and authorship declaration");
+    return list;
+  }, [formData, lang]);
+
+  const scrollToElement = (id: string) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.focus();
+    }
+  };
+
+  const req = settings?.fieldRequirements;
+
   const handleSubmit = async () => {
     const errors: string[] = [];
-    const req = settings?.fieldRequirements;
 
     if (req?.author && formData.author.length < 3) errors.push(lang === "sk" ? "Meno autora je príliš krátke alebo chýba" : "Author name is too short or missing");
     if (req?.email && !isValid.email) errors.push(lang === "sk" ? "Neplatný email" : "Invalid email");
@@ -355,6 +413,27 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
       if (uploadedCount > 0) {
         setSuccess(true);
         localStorage.removeItem("speleo_registration_draft");
+
+        // Odoslanie potvrdzovacieho emailu autorovi
+        try {
+          fetch("/api/send-confirmation", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              author: formData.author,
+              email: formData.email,
+              address: formData.address,
+              instagram: formData.instagram,
+              photos: photos.map(p => ({
+                name: p.name || (p.file ? p.file.name.split(".")[0] : "Untitled"),
+                category: p.category,
+                description: p.description || "",
+              })),
+            }),
+          }).catch(err => console.error("Confirmation email background error", err));
+        } catch (mailErr) {
+          console.error("Confirmation email trigger error", mailErr);
+        }
       } else {
         setError(lastError || (lang === "sk" ? "Chyba pri odosielaní / Error during submission" : "Error during submission"));
       }
@@ -384,65 +463,6 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
       </div>
     );
   }
-
-  // Wizard state for interactive completion modal
-  const [showWizard, setShowWizard] = useState(false);
-  const [wizardStep, setWizardStep] = useState<"author" | "photos" | "consents">("author");
-
-  const missingAuthorFields = useMemo(() => {
-    const list: { id: string; label: string; type: string; placeholder: string; isMissing: boolean }[] = [];
-    const req = settings?.fieldRequirements;
-    if (req?.author && !isValid.author) {
-      list.push({ id: "author", label: lang === "sk" ? "Meno a priezvisko autor (min. 3 znaky)" : "Full Name (min. 3 chars)", type: "text", placeholder: "napr. Ján Slovák", isMissing: true });
-    }
-    if (req?.email && !isValid.email) {
-      list.push({ id: "email", label: lang === "sk" ? "Platná e-mailová adresa" : "Valid Email Address", type: "email", placeholder: "email@example.sk", isMissing: true });
-    }
-    if (req?.address && !isValid.address) {
-      list.push({ id: "address", label: lang === "sk" ? "Korešpondenčná adresa (min. 5 znakov)" : "Address (min. 5 chars)", type: "text", placeholder: "Ulica, PSČ, Mesto, Štát", isMissing: true });
-    }
-    if (req?.instagram && !isValid.instagram) {
-      list.push({ id: "instagram", label: lang === "sk" ? "Instagram účet (začínajúci @)" : "Instagram handle (starting with @)", type: "text", placeholder: "@meno", isMissing: true });
-    }
-    return list;
-  }, [settings, isValid, lang]);
-
-  const invalidPhotos = useMemo(() => {
-    return photos.map((p, idx) => {
-      const catSet = settings?.categories?.find(c => c.id === p.category);
-      const pMin = catSet?.minDesc || 0;
-      const pMax = catSet?.maxDesc || 5000;
-      const pReq = catSet?.descRequired;
-      const len = p.description ? p.description.length : 0;
-      const isMissing = Boolean((pReq && len === 0) || len < pMin || len > pMax);
-      return {
-        idx,
-        photo: p,
-        catName: lang === "sk" ? catSet?.nameSk || p.category : catSet?.nameEn || p.category,
-        minDesc: pMin,
-        maxDesc: pMax,
-        descRequired: pReq,
-        isMissing
-      };
-    }).filter(item => item.isMissing);
-  }, [photos, settings, lang]);
-
-  const missingConsents = useMemo(() => {
-    const list: string[] = [];
-    if (!formData.gdprConsent) list.push(lang === "sk" ? "Súhlas so spracovaním údajov (GDPR)" : "GDPR Consent");
-    if (!formData.rulesConsent) list.push(lang === "sk" ? "Súhlas s pravidlami a vyhlásenie autorstva" : "Agreement with rules and authorship declaration");
-    return list;
-  }, [formData, lang]);
-
-  const scrollToElement = (id: string) => {
-    const el = document.getElementById(id);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-      el.focus();
-    }
-  };
-
-  const req = settings?.fieldRequirements;
 
   return (
     <div className="space-y-12">

@@ -106,6 +106,13 @@ export default function App() {
     fetchSettings();
   }, []);
 
+  useEffect(() => {
+    const title = lang === "sk" 
+      ? (settings?.contestNameSk || "Speleofotografia 2026") 
+      : (settings?.contestNameEn || "Speleophotography 2026");
+    document.title = title;
+  }, [settings, lang]);
+
   const fetchSettings = async () => {
     setLoading(true);
     try {

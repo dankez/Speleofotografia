@@ -30,6 +30,10 @@ uploads/**/*
 # Agent & System files
 graphify-out/
 .gemini/
+.antigravitycli/
+__pycache__/
+*.pyc
+broadcast_report.txt
 demo/
 scratch/
 venv/

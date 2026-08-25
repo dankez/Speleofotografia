@@ -244,6 +244,121 @@ function send_json($data, $code = 200) {
     exit;
 }
 
+/** Odosielanie emailov s podporou SMTP a PHP mail() fallbackom */
+function send_system_email($to, $subject, $htmlContent) {
+    $s = read_settings();
+    $smtpHost   = trim($s['smtpHost'] ?? '');
+    $smtpPort   = intval($s['smtpPort'] ?? 587);
+    $smtpUser   = trim($s['smtpUser'] ?? '');
+    $smtpPass   = trim($s['smtpPass'] ?? '');
+    $smtpSecure = strtolower(trim($s['smtpSecure'] ?? ''));
+    $fromEmail  = trim($s['emailFrom'] ?? '') ?: ($smtpUser ?: 'noreply@speleof26.sss.sk');
+    $fromName   = $s['contestName'] ?? 'Speleofotografia 2026';
+
+    dlog("EMAIL ATTEMPT: to=$to, subject='$subject', host=$smtpHost, from=$fromEmail");
+
+    if (!empty($smtpHost)) {
+        try {
+            $errno = 0;
+            $errstr = '';
+            $timeout = 8;
+            
+            $socketHost = ($smtpSecure === 'ssl' || $smtpPort === 465) ? "ssl://{$smtpHost}" : $smtpHost;
+            $socket = @fsockopen($socketHost, $smtpPort, $errno, $errstr, $timeout);
+            
+            if ($socket) {
+                stream_set_timeout($socket, 8);
+                $read = function() use ($socket) {
+                    $response = '';
+                    while ($line = fgets($socket, 515)) {
+                        $response .= $line;
+                        if (substr($line, 3, 1) === ' ') break;
+                    }
+                    return $response;
+                };
+                $write = function($cmd) use ($socket) {
+                    fputs($socket, $cmd . "\r\n");
+                };
+
+                $read();
+                $write("EHLO " . ($_SERVER['SERVER_NAME'] ?? 'localhost'));
+                $read();
+
+                if ($smtpSecure === 'tls' || ($smtpSecure !== 'ssl' && $smtpPort !== 465)) {
+                    $write("STARTTLS");
+                    $res = $read();
+                    if (strpos($res, '220') !== false) {
+                        $cryptoMethod = STREAM_CRYPTO_METHOD_TLS_CLIENT;
+                        if (defined('STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT')) {
+                            $cryptoMethod |= STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT;
+                        }
+                        if (defined('STREAM_CRYPTO_METHOD_TLSv1_3_CLIENT')) {
+                            $cryptoMethod |= STREAM_CRYPTO_METHOD_TLSv1_3_CLIENT;
+                        }
+                        @stream_socket_enable_crypto($socket, true, $cryptoMethod);
+                        $write("EHLO " . ($_SERVER['SERVER_NAME'] ?? 'localhost'));
+                        $read();
+                    }
+                }
+
+                if (!empty($smtpUser) && !empty($smtpPass)) {
+                    $write("AUTH LOGIN");
+                    $read();
+                    $write(base64_encode($smtpUser));
+                    $read();
+                    $write(base64_encode($smtpPass));
+                    $authRes = $read();
+                    if (strpos($authRes, '235') === false) {
+                        dlog("EMAIL SMTP AUTH FAILED: $authRes");
+                        throw new Exception("SMTP Auth Failed: $authRes");
+                    }
+                }
+
+                $write("MAIL FROM: <$fromEmail>");
+                $read();
+                $write("RCPT TO: <$to>");
+                $read();
+                $write("DATA");
+                $read();
+
+                $headers  = "MIME-Version: 1.0\r\n";
+                $headers .= "Content-Type: text/html; charset=UTF-8\r\n";
+                $headers .= "From: =?UTF-8?B?" . base64_encode($fromName) . "?= <$fromEmail>\r\n";
+                $headers .= "To: <$to>\r\n";
+                $headers .= "Subject: =?UTF-8?B?" . base64_encode($subject) . "?=\r\n";
+                $headers .= "Date: " . date('r') . "\r\n";
+
+                $write($headers . "\r\n" . $htmlContent . "\r\n.");
+                $sendRes = $read();
+                $write("QUIT");
+                fclose($socket);
+
+                if (strpos($sendRes, '250') !== false) {
+                    dlog("EMAIL SMTP SUCCESS: $to");
+                    return true;
+                } else {
+                    dlog("EMAIL SMTP DATA FAILED: $sendRes");
+                }
+            } else {
+                dlog("EMAIL SMTP CONNECT FAILED: $errstr ($errno)");
+            }
+        } catch (Exception $e) {
+            dlog("EMAIL SMTP EXCEPTION: " . $e->getMessage());
+        }
+    }
+
+    $headers  = "MIME-Version: 1.0\r\n";
+    $headers .= "Content-type: text/html; charset=UTF-8\r\n";
+    $headers .= "From: =?UTF-8?B?" . base64_encode($fromName) . "?= <$fromEmail>\r\n";
+    $headers .= "Reply-To: $fromEmail\r\n";
+    $headers .= "X-Mailer: Speleofoto/3.4\r\n";
+
+    $encodedSubject = "=?UTF-8?B?" . base64_encode($subject) . "?=";
+    $ok = @mail($to, $encodedSubject, $htmlContent, $headers);
+    dlog("EMAIL PHP mail() " . ($ok ? "SUCCESS" : "FAILED") . " to $to");
+    return $ok;
+}
+
 // ============================================================
 // === DEBUG
 // ============================================================
@@ -659,6 +774,149 @@ if ($path === '/register' && $method === 'POST') {
         dlog("REGISTER FAIL: Ziadny subor spracovany. Chyby: " . implode('; ', $errors));
         send_json(['success' => false, 'error' => 'Žiadna fotografia nebola spracovaná', 'details' => $errors], 500);
     }
+}
+
+// ============================================================
+// === POTVRDZOVACÍ EMAIL PO REGISTRÁCII
+// ============================================================
+if ($path === '/send-confirmation' && $method === 'POST') {
+    $data = json_input();
+    $email = trim($data['email'] ?? '');
+    $author = trim($data['author'] ?? 'Účastník');
+    $photosList = $data['photos'] ?? [];
+
+    if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        send_json(['success' => false, 'error' => 'Neplatná emailová adresa'], 400);
+    }
+
+    $s = read_settings();
+    $contestName = $s['contestName'] ?? 'Speleofotografia 2026';
+    $edition = $s['edition'] ?? '23. ročník';
+    $museumName = $s['museumName'] ?? 'Slovenské múzeum ochrany prírody a jaskyniarstva';
+
+    $subject = "Potvrdenie registrácie / Registration Confirmation - $contestName";
+
+    $photosHtml = '';
+    foreach ($photosList as $idx => $ph) {
+        $num = $idx + 1;
+        $name = htmlspecialchars($ph['name'] ?? "Fotografia $num", ENT_QUOTES, 'UTF-8');
+        $cat = htmlspecialchars($ph['category'] ?? 'A', ENT_QUOTES, 'UTF-8');
+        $desc = !empty($ph['description']) ? htmlspecialchars($ph['description'], ENT_QUOTES, 'UTF-8') : '';
+        
+        $catLabel = ($cat === 'A') ? 'Kategória A – Krása jaskýň / Beauty of Caves' : (($cat === 'B') ? 'Kategória B – Speleomoment' : "Kategória $cat");
+
+        $photosHtml .= "<tr style='border-bottom: 1px solid #edf2f7;'>
+            <td style='padding: 12px 10px; font-weight: bold; color: #2d3748;'>#$num</td>
+            <td style='padding: 12px 10px; color: #1a202c;'><strong>$name</strong>" . ($desc ? "<div style='font-size: 12px; color: #718096; margin-top: 4px; font-style: italic;'>$desc</div>" : "") . "</td>
+            <td style='padding: 12px 10px; color: #4a5568;'><span style='background: #edf2f7; padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: 600;'>$catLabel</span></td>
+        </tr>";
+    }
+
+    if (empty($photosHtml)) {
+        $photosHtml = "<tr><td colspan='3' style='padding: 12px; color: #718096; text-align: center;'>Fotografie boli úspešne prijaté / Photos received</td></tr>";
+    }
+
+    $safeAuthor = htmlspecialchars($author, ENT_QUOTES, 'UTF-8');
+    $currentDate = date('d.m.Y H:i');
+
+    $htmlBody = <<<HTML
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Potvrdenie registrácie / Registration Confirmation</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f4f6f8; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f4f6f8; padding: 30px 10px;">
+    <tr>
+      <td align="center">
+        <table width="100%" cellpadding="0" cellspacing="0" style="max-width: 620px; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.06); border: 1px solid #e2e8f0;">
+          <!-- Header -->
+          <tr>
+            <td style="background-color: #1a202c; padding: 30px 25px; text-align: center; border-bottom: 4px solid #eab308;">
+              <h1 style="margin: 0; color: #ffffff; font-size: 22px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase;">
+                $contestName
+              </h1>
+              <p style="margin: 6px 0 0 0; color: #cbd5e1; font-size: 13px; letter-spacing: 1px; text-transform: uppercase;">
+                $edition &bull; $museumName
+              </p>
+            </td>
+          </tr>
+          
+          <!-- Content -->
+          <tr>
+            <td style="padding: 30px 25px; color: #2d3748; font-size: 15px; line-height: 1.6;">
+              <!-- SK text -->
+              <p style="font-size: 16px; font-weight: bold; margin-top: 0; color: #1a202c;">
+                Vážený/á $safeAuthor,
+              </p>
+              <p style="margin-bottom: 20px;">
+                Ďakujeme za zaslanie prihlášky do medzinárodnej fotografickej súťaže <strong>$contestName</strong>. Vaša prihláška bola úspešne zaregistrovaná v systéme dňa <strong>$currentDate</strong>.
+              </p>
+
+              <!-- Photo list table -->
+              <div style="background-color: #f8fafc; border-radius: 6px; border: 1px solid #e2e8f0; padding: 15px; margin: 25px 0;">
+                <h3 style="margin: 0 0 12px 0; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; color: #4a5568; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px;">
+                  Zoznam prihlásených fotografií / Submitted Works
+                </h3>
+                <table width="100%" cellpadding="0" cellspacing="0" style="font-size: 14px; text-align: left;">
+                  <thead>
+                    <tr style="border-bottom: 2px solid #cbd5e1; color: #718096; font-size: 12px; text-transform: uppercase;">
+                      <th style="padding: 8px 10px;">#</th>
+                      <th style="padding: 8px 10px;">Názov / Title</th>
+                      <th style="padding: 8px 10px;">Kategória / Category</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    $photosHtml
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- EN text -->
+              <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 25px 0;" />
+              <p style="font-size: 15px; font-weight: bold; color: #1a202c;">
+                Dear $safeAuthor,
+              </p>
+              <p style="margin-bottom: 20px; color: #4a5568;">
+                Thank you for your entry into the international photo competition <strong>$contestName</strong>. Your application and submitted works were successfully received on <strong>$currentDate</strong>.
+              </p>
+
+              <!-- Button / Link -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin: 30px 0 15px 0;">
+                <tr>
+                  <td align="center">
+                    <a href="https://speleof26.sss.sk/" style="display: inline-block; background-color: #1a202c; color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 4px; font-weight: bold; font-size: 13px; text-transform: uppercase; letter-spacing: 1.5px; border-left: 3px solid #eab308;">
+                      Navštíviť stránku súťaže / Visit Website
+                    </a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #f8fafc; padding: 20px 25px; text-align: center; border-top: 1px solid #e2e8f0; font-size: 12px; color: #718096; line-height: 1.5;">
+              <p style="margin: 0 0 5px 0;">
+                <strong>Slovenská speleologická spoločnosť & Slovenské múzeum ochrany prírody a jaskyniarstva</strong>
+              </p>
+              <p style="margin: 0; color: #a0aec0;">
+                Tento email bol vygenerovaný automaticky po odoslaní registračného formulára na <a href="https://speleof26.sss.sk/" style="color: #4a5568; text-decoration: underline;">speleof26.sss.sk</a>.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+HTML;
+
+    $sent = send_system_email($email, $subject, $htmlBody);
+    send_json(['success' => true, 'emailSent' => $sent]);
 }
 
 // ============================================================
@@ -1279,6 +1537,175 @@ if ($path === '/admin/photos/bulk-delete' && $method === 'POST') {
 
     file_put_contents(REGISTRATIONS_CSV, $header . "\n" . implode("\n", $remaining) . ($remaining ? "\n" : ""), LOCK_EX);
     send_json(['success' => true, 'deleted' => $deletedCount]);
+}
+
+// ============================================================
+// === ADMIN: HROMADNÁ ZMENA KATEGÓRIE FOTIEK
+// ============================================================
+if ($path === '/admin/photos/bulk-category' && $method === 'POST') {
+    $data = json_input();
+    $ids = $data['ids'] ?? [];
+    $newCategory = trim($data['category'] ?? '');
+
+    if (empty($ids) || !is_array($ids) || empty($newCategory)) {
+        send_json(['error' => 'Chýbajúce ID fotografií alebo nová kategória'], 400);
+    }
+
+    if (!file_exists(REGISTRATIONS_CSV)) {
+        send_json(['error' => 'Žiadne registrácie'], 404);
+    }
+
+    // Auto-backup pred zápisom
+    ensure_dir(DATA_DIR . '/backups');
+    copy(REGISTRATIONS_CSV, DATA_DIR . '/backups/registrations_' . date('Ymd_His') . '.csv.bak');
+
+    $lines = file(REGISTRATIONS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    $header = array_shift($lines);
+    $idSet = array_flip($ids);
+    $updatedCount = 0;
+    $newLines = [];
+
+    foreach ($lines as $line) {
+        $p = str_getcsv($line);
+        $id = $p[0] ?? '';
+        if (isset($idSet[$id])) {
+            $p[8] = $newCategory; // category index
+            $esc = fn($v) => '"' . str_replace('"', '""', $v) . '"';
+            $newLines[] = implode(',', array_map($esc, $p));
+            $updatedCount++;
+            dlog("BULK CATEGORY: id=$id -> $newCategory");
+        } else {
+            $newLines[] = $line;
+        }
+    }
+
+    file_put_contents(REGISTRATIONS_CSV, $header . "\n" . implode("\n", $newLines) . ($newLines ? "\n" : ""), LOCK_EX);
+    send_json(['success' => true, 'updated' => $updatedCount]);
+}
+
+// ============================================================
+// === ADMIN: HROMADNÉ STIAHNUTIE VYBRANÝCH FOTIEK (ZIP)
+// ============================================================
+if ($path === '/admin/photos/bulk-download' && $method === 'POST') {
+    if (!extension_loaded('zip')) {
+        send_json(['error' => 'ZIP rozšírenie nie je na serveri dostupné'], 500);
+    }
+
+    $data = json_input();
+    $ids = $data['ids'] ?? [];
+    if (empty($ids) || !is_array($ids)) {
+        send_json(['error' => 'Neboli vybrané žiadne fotografie'], 400);
+    }
+
+    $photos = read_registrations();
+    $idSet = array_flip($ids);
+
+    ensure_dir(DATA_DIR . '/backups');
+    $zipFile = DATA_DIR . '/backups/selected_photos_' . date('Ymd_His') . '.zip';
+    $zip = new ZipArchive();
+
+    if ($zip->open($zipFile, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== TRUE) {
+        send_json(['error' => 'Nepodarilo sa vytvoriť ZIP archív'], 500);
+    }
+
+    $addedCount = 0;
+    foreach ($photos as $p) {
+        if (isset($idSet[$p['id']])) {
+            $file = $p['originalPath'] ?? '';
+            if ($file) {
+                $filePath = ORIGINALS_DIR . '/' . $file;
+                if (file_exists($filePath)) {
+                    $zip->addFile($filePath, $file);
+                    $addedCount++;
+                }
+            }
+        }
+    }
+
+    $zip->close();
+
+    if ($addedCount === 0) {
+        if (file_exists($zipFile)) unlink($zipFile);
+        send_json(['error' => 'Vybrané fotografie sa nenašli na disku'], 404);
+    }
+
+    dlog("EXPORT: bulk-download count=$addedCount size=" . filesize($zipFile));
+
+    while (ob_get_level()) ob_end_clean();
+    header('Content-Type: application/zip');
+    header('Content-Disposition: attachment; filename="speleofoto_vyber_' . count($ids) . 'ks_' . date('Y-m-d') . '.zip"');
+    header('Content-Length: ' . filesize($zipFile));
+    header('Pragma: no-cache');
+    header('Cache-Control: must-revalidate, post-check=0, pre-check=0');
+    header('Expires: 0');
+
+    $handle = fopen($zipFile, 'rb');
+    if ($handle) {
+        while (!feof($handle)) {
+            echo fread($handle, 1024 * 1024);
+            flush();
+        }
+        fclose($handle);
+    }
+    unlink($zipFile);
+    exit;
+}
+
+// ============================================================
+// === ADMIN: KOMPLETNÁ ZÁLOHA DÁT A NASTAVENÍ (ZIP)
+// ============================================================
+if ($path === '/admin/export/backup-data' && $method === 'GET') {
+    dlog("EXPORT: backup-data requested");
+    
+    // Auto-create backup dir
+    ensure_dir(DATA_DIR . '/backups');
+    
+    if (extension_loaded('zip')) {
+        $zipFile = DATA_DIR . '/backups/speleofoto_backup_' . date('Ymd_His') . '.zip';
+        $zip = new ZipArchive();
+        if ($zip->open($zipFile, ZipArchive::CREATE | ZipArchive::OVERWRITE) === TRUE) {
+            $dataFiles = ['settings.json', 'registrations.csv', 'ratings.csv', 'public_votes.csv', 'admins.json', 'evaluators.csv', 'tokens.json'];
+            foreach ($dataFiles as $df) {
+                $p = DATA_DIR . '/' . $df;
+                if (file_exists($p)) {
+                    $zip->addFile($p, $df);
+                }
+            }
+            $zip->close();
+
+            while (ob_get_level()) ob_end_clean();
+            header('Content-Type: application/zip');
+            header('Content-Disposition: attachment; filename="speleofotografia_zaloha_dat_' . date('Y-m-d_H-i') . '.zip"');
+            header('Content-Length: ' . filesize($zipFile));
+            header('Pragma: no-cache');
+            header('Cache-Control: must-revalidate, post-check=0, pre-check=0');
+            header('Expires: 0');
+
+            $handle = fopen($zipFile, 'rb');
+            if ($handle) {
+                while (!feof($handle)) {
+                    echo fread($handle, 1024 * 1024);
+                    flush();
+                }
+                fclose($handle);
+            }
+            unlink($zipFile);
+            exit;
+        }
+    }
+    
+    // Fallback JSON bundle ak ZIP nie je dostupný
+    $bundle = [
+        'timestamp' => date('c'),
+        'settings' => read_settings(),
+        'registrations' => file_exists(REGISTRATIONS_CSV) ? file_get_contents(REGISTRATIONS_CSV) : '',
+        'ratings' => file_exists(RATINGS_CSV) ? file_get_contents(RATINGS_CSV) : '',
+        'public_votes' => file_exists(PUBLIC_VOTES_CSV) ? file_get_contents(PUBLIC_VOTES_CSV) : '',
+    ];
+    header('Content-Type: application/json; charset=utf-8');
+    header('Content-Disposition: attachment; filename="speleofotografia_zaloha_' . date('Y-m-d') . '.json"');
+    echo json_encode($bundle, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+    exit;
 }
 
 // ============================================================

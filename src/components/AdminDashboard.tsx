@@ -135,6 +135,50 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
     }
   };
 
+  const bulkChangeCategory = async (newCategory: string) => {
+    if (!selectedPhotos.length) return;
+    const catLabel = newCategory === "A" ? "Kategória A" : (newCategory === "B" ? "Kategória B" : newCategory);
+    if (!confirm(lang === "sk" ? `Naozaj chcete presunúť ${selectedPhotos.length} vybraných fotografií do: ${catLabel}?` : `Do you really want to move ${selectedPhotos.length} selected photos to: ${catLabel}?`)) return;
+
+    try {
+      const res = await fetchWithAuth("/api/admin/photos/bulk-category", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: selectedPhotos, category: newCategory })
+      });
+      if (res.ok) {
+        setSelectedPhotos([]);
+        fetchData();
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const bulkDownloadSelected = async () => {
+    if (!selectedPhotos.length) return;
+    try {
+      const res = await fetchWithAuth("/api/admin/photos/bulk-download", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: selectedPhotos })
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `speleofoto_vyber_${selectedPhotos.length}ks.zip`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const deleteSelected = async () => {
     if (!selectedPhotos.length) return;
     if (!confirm(lang === "sk" ? `Naozaj chcete zmazať ${selectedPhotos.length} vybraných fotografií?` : `Do you really want to delete ${selectedPhotos.length} selected photos?`)) return;
@@ -536,6 +580,11 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
   const downloadTotalArchive = () => {
     const token = localStorage.getItem("speleofoto_token") || "";
     window.location.href = `/api/admin/export/total-archive?token=${encodeURIComponent(token)}`;
+  };
+
+  const downloadDataBackup = () => {
+    const token = localStorage.getItem("speleofoto_token") || "";
+    window.location.href = `/api/admin/export/backup-data?token=${encodeURIComponent(token)}`;
   };
 
   const fetchData = async () => {
@@ -1987,16 +2036,36 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                 {/* Kompletný Archív */}
                 <div className="p-5 bg-paper border border-border border-dashed flex flex-col justify-between space-y-4">
                   <div className="space-y-1">
-                    <h4 className="text-[12px] font-bold uppercase tracking-wider text-accent">Kompletný archív (.ZIP)</h4>
+                    <h4 className="text-[12px] font-bold uppercase tracking-wider text-accent">Kompletný archív fotografií (.ZIP)</h4>
                     <p className="text-[10px] text-muted leading-relaxed">
-                      Všetky fotografie roztriedené do priečinkov + kompletné databázy CSV.
+                      Všetky originálne fotografie súťaže v jednom archíve pre tlačovú prípravu.
                     </p>
                   </div>
                   <button 
                     onClick={downloadTotalArchive}
                     className="w-full flex items-center justify-center gap-2 py-3 bg-accent text-white text-[10px] font-bold uppercase tracking-widest hover:opacity-90 transition-all shadow-sm"
                   >
-                    <FileText size={14} /> Download ZIP
+                    <FileText size={14} /> Download Photos ZIP
+                  </button>
+                </div>
+
+                {/* 1-Click Kompletná Záloha Dát */}
+                <div className="p-5 bg-green-50/60 border border-green-200 flex flex-col justify-between space-y-4 shadow-sm md:col-span-2">
+                  <div className="space-y-1">
+                    <h4 className="text-[12px] font-bold uppercase tracking-wider text-green-700 flex items-center gap-1.5">
+                      <Shield size={14} /> {lang === "sk" ? "Kompletná záloha databázy a nastavení (.ZIP)" : "Complete Database & Settings Backup (.ZIP)"}
+                    </h4>
+                    <p className="text-[10px] text-green-800/80 leading-relaxed">
+                      {lang === "sk" 
+                        ? "1-klikové bezpečné stiahnutie všetkých registrácií, hlasov, hodnotení poroty, porotcov a konfigurácie (CSV + JSON súbory)."
+                        : "1-click secure download of all registrations, public votes, jury ratings, judges, and configuration (CSV + JSON files)."}
+                    </p>
+                  </div>
+                  <button 
+                    onClick={downloadDataBackup}
+                    className="w-full flex items-center justify-center gap-2 py-3.5 bg-green-600 text-white text-[11px] font-bold uppercase tracking-widest hover:bg-green-700 transition-all shadow-md"
+                  >
+                    <Download size={15} /> {lang === "sk" ? "Stiahnuť zálohu dát (ZIP / JSON)" : "Download Data Backup (ZIP / JSON)"}
                   </button>
                 </div>
               </div>
@@ -2366,7 +2435,7 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
 
             {/* Bulk Actions Bar */}
             <div className={cn(
-              "sticky top-4 z-30 flex items-center justify-between bg-ink text-white p-4 transition-all duration-300 shadow-2xl",
+              "sticky top-4 z-30 flex flex-wrap items-center justify-between gap-3 bg-ink text-white p-4 transition-all duration-300 shadow-2xl border-l-4 border-accent",
               selectedPhotos.length > 0 ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-4 pointer-events-none h-0 p-0 overflow-hidden"
             )}>
               <div className="flex items-center gap-4">
@@ -2380,18 +2449,32 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                   {selectedPhotos.length === filteredPhotos.length ? (lang === "sk" ? "Zrušiť výber" : "Deselect All") : (lang === "sk" ? "Vybrať všetko" : "Select All")}
                 </button>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button 
-                  onClick={deleteSelected}
-                  className="px-4 py-2 bg-red-500 text-white text-[10px] font-bold uppercase tracking-widest hover:bg-red-600 transition-all flex items-center gap-2"
+                  onClick={() => bulkChangeCategory("A")}
+                  className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white text-[10px] font-bold uppercase tracking-widest transition-all flex items-center gap-1.5"
+                  title="Presunúť do Kategórie A"
                 >
-                  <Trash2 size={14} /> {lang === "sk" ? "Zmazať vybrané" : "Delete Selected"}
+                  <ImageIcon size={13} /> {lang === "sk" ? "Presunúť do Kat. A" : "Move to Cat. A"}
                 </button>
                 <button 
-                  onClick={deleteAll}
-                  className="px-4 py-2 border border-white/30 text-white text-[10px] font-bold uppercase tracking-widest hover:bg-white hover:text-ink transition-all flex items-center gap-2"
+                  onClick={() => bulkChangeCategory("B")}
+                  className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white text-[10px] font-bold uppercase tracking-widest transition-all flex items-center gap-1.5"
+                  title="Presunúť do Kategórie B"
                 >
-                  <AlertTriangle size={14} /> {lang === "sk" ? "Zmazať ÚPLNE všetko" : "Delete ABSOLUTELY All"}
+                  <ImageIcon size={13} /> {lang === "sk" ? "Presunúť do Kat. B" : "Move to Cat. B"}
+                </button>
+                <button 
+                  onClick={bulkDownloadSelected}
+                  className="px-3 py-2 bg-accent text-white text-[10px] font-bold uppercase tracking-widest hover:opacity-90 transition-all flex items-center gap-1.5"
+                >
+                  <Download size={13} /> {lang === "sk" ? "Stiahnuť vybrané (ZIP)" : "Download (ZIP)"}
+                </button>
+                <button 
+                  onClick={deleteSelected}
+                  className="px-3 py-2 bg-red-500 text-white text-[10px] font-bold uppercase tracking-widest hover:bg-red-600 transition-all flex items-center gap-1.5"
+                >
+                  <Trash2 size={13} /> {lang === "sk" ? "Zmazať vybrané" : "Delete Selected"}
                 </button>
                 <button 
                   onClick={() => setSelectedPhotos([])}
