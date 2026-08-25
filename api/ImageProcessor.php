@@ -16,6 +16,9 @@ class ImageProcessor {
         if (!$info) return false;
 
         [$origWidth, $origHeight, $type] = $info;
+        if (!in_array($type, [IMAGETYPE_JPEG, IMAGETYPE_PNG, IMAGETYPE_WEBP])) {
+            return false;
+        }
         $src = self::createFromType($sourcePath, $type);
         if (!$src) return false;
 
@@ -59,6 +62,9 @@ class ImageProcessor {
         if (!$info) return false;
 
         [$origWidth, $origHeight, $type] = $info;
+        if (!in_array($type, [IMAGETYPE_JPEG, IMAGETYPE_PNG, IMAGETYPE_WEBP])) {
+            return false;
+        }
         $src = self::createFromType($sourcePath, $type);
         if (!$src) return false;
 

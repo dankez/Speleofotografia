@@ -76,10 +76,6 @@ function check_auth() {
     if (!$token) {
         send_json(['error' => 'Neautorizovaný prístup (Chýba token)'], 401);
     }
-    
-    if ($token === 'speleofoto-admin-token') {
-        return ['email' => 'admin@sss.sk'];
-    }
 
     if (!file_exists(TOKENS_JSON)) {
         send_json(['error' => 'Neautorizovaný prístup (Platnosť vypršala)'], 401);
@@ -360,9 +356,10 @@ function send_system_email($to, $subject, $htmlContent) {
 }
 
 // ============================================================
-// === DEBUG
+// === DEBUG (Chránené pre administrátorov)
 // ============================================================
 if ($path === '/debug' && $method === 'GET') {
+    check_auth();
     header('Content-Type: text/plain; charset=utf-8');
     $photos = read_registrations();
     echo "=== SPELEOFOTOGRAFIA DEBUG ===\n";
@@ -610,24 +607,25 @@ if ($path === '/public/vote' && $method === 'POST') {
         }
         
         $now = time();
-        $ipVotes = $limits[$ip] ?? [];
-        
-        // Vyčistiť staré záznamy mimo časového okna
-        $ipVotesFiltered = [];
-        foreach ($ipVotes as $ts) {
-            if ($now - $ts < $rateLimitWindow) {
-                $ipVotesFiltered[] = $ts;
+        $cleanedLimits = [];
+        foreach ($limits as $kIp => $timestamps) {
+            if (!is_array($timestamps)) continue;
+            $validTs = array_values(array_filter($timestamps, fn($ts) => ($now - $ts) < $rateLimitWindow));
+            if (!empty($validTs)) {
+                $cleanedLimits[$kIp] = $validTs;
             }
         }
+
+        $ipVotesFiltered = $cleanedLimits[$ip] ?? [];
         
         if (count($ipVotesFiltered) >= $rateLimitVotes) {
             send_json(['error' => 'Prekročili ste limit verejného hlasovania z vašej IP adresy. Skúste to neskôr.'], 429);
         }
         
-        // Pridaj nový záznam a ulož
+        // Pridaj nový záznam a ulož prečistený súbor
         $ipVotesFiltered[] = $now;
-        $limits[$ip] = $ipVotesFiltered;
-        file_put_contents($limitsFile, json_encode($limits, JSON_PRETTY_PRINT), LOCK_EX);
+        $cleanedLimits[$ip] = $ipVotesFiltered;
+        file_put_contents($limitsFile, json_encode($cleanedLimits, JSON_PRETTY_PRINT), LOCK_EX);
     }
 
     // 2. Cloudflare Turnstile Validation
@@ -689,6 +687,40 @@ if ($path === '/register' && $method === 'POST') {
     $s = read_settings();
     $photoInfos = json_decode($_POST['photoInfo'] ?? '[]', true) ?? [];
     $author = trim($_POST['author'] ?? 'Anonym');
+    $authorEmail = strtolower(trim($_POST['email'] ?? ''));
+
+    // Server-side kontrola limitu fotiek na kategóriu
+    $maxPhotos = intval($s['maxPhotosPerCategory'] ?? 5);
+    if ($maxPhotos <= 0) $maxPhotos = 5;
+
+    if (!empty($authorEmail)) {
+        $existingPhotos = read_registrations();
+        $existingCounts = [];
+        foreach ($existingPhotos as $ep) {
+            if (strtolower($ep['email'] ?? '') === $authorEmail) {
+                $cat = $ep['category'] ?? 'A';
+                $existingCounts[$cat] = ($existingCounts[$cat] ?? 0) + 1;
+            }
+        }
+
+        $incomingCounts = [];
+        foreach ($fileList as $i => $file) {
+            $pInfo = $photoInfos[$i] ?? [];
+            $cat = $pInfo['category'] ?? 'A';
+            $incomingCounts[$cat] = ($incomingCounts[$cat] ?? 0) + 1;
+        }
+
+        foreach ($incomingCounts as $cat => $incCount) {
+            $currentTotal = ($existingCounts[$cat] ?? 0) + $incCount;
+            if ($currentTotal > $maxPhotos) {
+                dlog("REGISTER LIMIT EXCEEDED: email=$authorEmail cat=$cat ($currentTotal > $maxPhotos)");
+                send_json([
+                    'success' => false,
+                    'error' => "Prekročený maximálny povolený počet fotografií v kategórii $cat (max $maxPhotos)."
+                ], 400);
+            }
+        }
+    }
 
     ensure_dir(UPLOADS_DIR);
     ensure_dir(ORIGINALS_DIR);
@@ -715,10 +747,19 @@ if ($path === '/register' && $method === 'POST') {
     
     dlog("REGISTER: wTpl=$watermarkTpl, wSize=$wFontSize, wColor=$wColor");
 
+    $allowedExts = ['jpg', 'jpeg', 'png', 'webp'];
+
     foreach ($fileList as $i => $file) {
         if ($file['error'] !== UPLOAD_ERR_OK) {
             dlog("FILE $i ERR kod=" . $file['error']);
             $errors[] = "Súbor $i: chyba nahrávania (kód " . $file['error'] . ")";
+            continue;
+        }
+
+        $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+        if (!in_array($ext, $allowedExts)) {
+            dlog("FILE $i INVALID EXT: $ext");
+            $errors[] = "Súbor {$file['name']}: nepodporovaný formát súboru (povolené: JPG, PNG, WEBP)";
             continue;
         }
 
@@ -758,11 +799,11 @@ if ($path === '/register' && $method === 'POST') {
                 $esc($pInfo['description'] ?? ''),
                 '"{}"',
                 date('c'),
-                'true',
+                'false',           // predvolene NIE JE v shortliste
             ]);
         } else {
             dlog("FILE $i FAILED: ImageProcessor zlyhal");
-            $errors[] = "Súbor {$file['name']}: chyba pri spracovaní";
+            $errors[] = "Súbor {$file['name']}: chyba pri spracovaní (neplatný obrázok)";
         }
     }
 
@@ -1298,7 +1339,19 @@ if ($path === '/jury/photos' && $method === 'GET') {
 // === JURY: MOJE HODNOTENIA
 // ============================================================
 if (preg_match('#^/ratings/([^/]+)$#', $path, $m) && $method === 'GET') {
-    $evalId = $m[1];
+    $evalId = trim($m[1]);
+    $evaluators = read_evaluators();
+    $matched = false;
+    foreach ($evaluators as $ev) {
+        if ($ev['id'] === $evalId) {
+            $matched = true;
+            break;
+        }
+    }
+    if (!$matched) {
+        send_json([]);
+    }
+
     $ratings = [];
     if (file_exists(RATINGS_CSV)) {
         $lines = file(RATINGS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
@@ -1322,14 +1375,42 @@ if (preg_match('#^/ratings/([^/]+)$#', $path, $m) && $method === 'GET') {
 // ============================================================
 if ($path === '/rate' && $method === 'POST') {
     $data = json_input();
-    $photoId = $data['photoId'] ?? '';
-    $evalId  = $data['evalId'] ?? '';
-    $evalName = $data['evalName'] ?? '';
-    $score    = (int)($data['score'] ?? 0);
+    $photoId = trim($data['photoId'] ?? '');
+    $evalId  = trim($data['evalId'] ?? '');
+    $score   = (int)($data['score'] ?? 0);
 
     if (!$photoId || !$evalId || $score < 1 || $score > 10) {
-        send_json(['error' => 'Neplatné údaje pre hodnotenie'], 400);
+        send_json(['error' => 'Neplatné údaje pre hodnotenie (povolené skóre 1-10)'], 400);
     }
+
+    // Overenie existencie a oprávnenia porotcu
+    $evaluators = read_evaluators();
+    $matchedEvaluator = null;
+    foreach ($evaluators as $ev) {
+        if ($ev['id'] === $evalId) {
+            $matchedEvaluator = $ev;
+            break;
+        }
+    }
+    if (!$matchedEvaluator) {
+        dlog("RATE REJECTED: neznámy porotca evalId=$evalId");
+        send_json(['error' => 'Neplatný alebo neexistujúci identifikátor porotcu'], 403);
+    }
+
+    // Overenie existencie fotografie
+    $photos = read_registrations();
+    $photoExists = false;
+    foreach ($photos as $ph) {
+        if ($ph['id'] === $photoId) {
+            $photoExists = true;
+            break;
+        }
+    }
+    if (!$photoExists) {
+        send_json(['error' => 'Fotografia neexistuje'], 404);
+    }
+
+    $evalName = $matchedEvaluator['name'];
 
     ensure_csv(RATINGS_CSV, 'evalId,evalName,photoId,score,createdAt');
     
@@ -1353,6 +1434,7 @@ if ($path === '/rate' && $method === 'POST') {
     ]);
     
     file_put_contents(RATINGS_CSV, implode("\n", $newLines) . "\n", LOCK_EX);
+    dlog("RATE SUCCESS: evalId=$evalId ($evalName), photoId=$photoId, score=$score");
     send_json(['success' => true]);
 }
 
@@ -1431,13 +1513,69 @@ if (preg_match('#^/admin/photos/([^/]+)$#', $path, $m) && $method === 'DELETE') 
 }
 
 // ============================================================
+// === ADMIN: ÚPRAVA DETAILOV FOTOGRAFIE (PATCH)
+// ============================================================
+if (preg_match('#^/admin/photos/([^/]+)$#', $path, $m) && $method === 'PATCH') {
+    $id = $m[1];
+    $updates = json_input();
+    
+    if (!file_exists(REGISTRATIONS_CSV)) {
+        send_json(['error' => 'Súbor s registráciami neexistuje'], 404);
+    }
+    
+    $lines = file(REGISTRATIONS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    $header = array_shift($lines);
+    $found = false;
+    $newLines = [];
+    
+    foreach ($lines as $line) {
+        $p = str_getcsv($line);
+        if (($p[0] ?? '') === $id) {
+            $found = true;
+            // 0:id, 1:author, 2:email, 3:instagram, 4:webpage, 5:address, 6:gdpr, 7:rules, 8:category, 9:name, 10:orig, 11:web, 12:desc, 13:meta, 14:date, 15:shortlisted
+            if (isset($updates['author']))      $p[1] = $updates['author'];
+            if (isset($updates['email']))       $p[2] = $updates['email'];
+            if (isset($updates['instagram']))   $p[3] = $updates['instagram'];
+            if (isset($updates['webpage']))     $p[4] = $updates['webpage'];
+            if (isset($updates['address']))     $p[5] = $updates['address'];
+            if (isset($updates['category']))    $p[8] = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $updates['category']));
+            if (isset($updates['name']))        $p[9] = $updates['name'];
+            if (isset($updates['description'])) $p[12] = $updates['description'];
+            if (isset($updates['shortlisted'])) $p[15] = ($updates['shortlisted'] === true || $updates['shortlisted'] === 'true' || $updates['shortlisted'] === 1) ? 'true' : 'false';
+            
+            $esc = fn($v) => '"' . str_replace('"', '""', $v) . '"';
+            $newLines[] = implode(',', array_map($esc, $p));
+            dlog("ADMIN PHOTO PATCH: id=$id updated");
+        } else {
+            $newLines[] = $line;
+        }
+    }
+    
+    if (!$found) {
+        send_json(['error' => 'Fotografia nenájdená'], 404);
+    }
+    
+    file_put_contents(REGISTRATIONS_CSV, $header . "\n" . implode("\n", $newLines) . ($newLines ? "\n" : ""), LOCK_EX);
+    send_json(['success' => true, 'id' => $id]);
+}
+
+// ============================================================
 // === ADMIN: ZMAZANIE VŠETKÝCH FOTIEK
 // ============================================================
 if ($path === '/admin/photos/delete-all' && $method === 'POST') {
-    dlog("DELETE ALL PHOTOS requested");
+    $data = json_input();
+    if (($data['confirm'] ?? '') !== 'DELETE_ALL') {
+        send_json(['error' => 'Potvrdenie akcie zlyhalo. Vyžaduje sa confirm: DELETE_ALL.'], 400);
+    }
+
+    dlog("DELETE ALL PHOTOS requested with valid confirmation");
     
     if (!file_exists(REGISTRATIONS_CSV)) send_json(['success' => true]);
     
+    // Auto-backup pred zmazaním
+    ensure_dir(DATA_DIR . '/backups');
+    copy(REGISTRATIONS_CSV, DATA_DIR . '/backups/registrations_before_deleteall_' . date('Ymd_His') . '.csv.bak');
+
     $lines = file(REGISTRATIONS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
     $header = array_shift($lines);
     
@@ -1545,10 +1683,11 @@ if ($path === '/admin/photos/bulk-delete' && $method === 'POST') {
 if ($path === '/admin/photos/bulk-category' && $method === 'POST') {
     $data = json_input();
     $ids = $data['ids'] ?? [];
-    $newCategory = trim($data['category'] ?? '');
+    $rawCategory = trim($data['category'] ?? '');
+    $newCategory = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $rawCategory));
 
     if (empty($ids) || !is_array($ids) || empty($newCategory)) {
-        send_json(['error' => 'Chýbajúce ID fotografií alebo nová kategória'], 400);
+        send_json(['error' => 'Chýbajúce ID fotografií alebo neplatná kategória'], 400);
     }
 
     if (!file_exists(REGISTRATIONS_CSV)) {
@@ -2069,11 +2208,99 @@ if ($path === '/admin/export/ratings-csv' && $method === 'GET') {
 }
 
 // ============================================================
+// === ADMIN: ODOSLANIE EMAILU AUTOROVI (COMMUNICATE)
+// ============================================================
+if ($path === '/admin/communicate' && $method === 'POST') {
+    $data = json_input();
+    $email = trim($data['email'] ?? '');
+    $subject = trim($data['subject'] ?? '');
+    $message = trim($data['message'] ?? '');
+
+    if (empty($email) || empty($subject) || empty($message)) {
+        send_json(['error' => 'Chýbajúce povinné polia (email, subject, message)'], 400);
+    }
+
+    $s = read_settings();
+    $contestName = $s['contestName'] ?? 'Speleofotografia 2026';
+    $htmlMessage = nl2br(htmlspecialchars($message, ENT_QUOTES, 'UTF-8'));
+    
+    $htmlBody = <<<HTML
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #2d3748; padding: 20px;">
+  <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 25px;">
+    <h2 style="color: #1a202c; border-bottom: 2px solid #eab308; padding-bottom: 8px; margin-top: 0;">$contestName</h2>
+    <div style="font-size: 15px; margin: 20px 0;">$htmlMessage</div>
+    <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 25px 0;">
+    <p style="font-size: 12px; color: #718096; margin: 0;">Správa bola odoslaná administrátorom súťaže $contestName.</p>
+  </div>
+</body>
+</html>
+HTML;
+
+    $sent = send_system_email($email, $subject, $htmlBody);
+    if ($sent) {
+        dlog("ADMIN COMMUNICATE SUCCESS: to=$email, subject=$subject");
+        send_json(['success' => true]);
+    } else {
+        dlog("ADMIN COMMUNICATE FAILED: to=$email");
+        send_json(['error' => 'Nepodarilo sa odoslať email (skontrolujte nastavenia SMTP)'], 500);
+    }
+}
+
+// ============================================================
+// === ADMIN: UPLOAD LOGA SÚŤAŽE
+// ============================================================
+if ($path === '/admin/upload-logo' && $method === 'POST') {
+    if (empty($_FILES['logo']) || $_FILES['logo']['error'] !== UPLOAD_ERR_OK) {
+        send_json(['error' => 'Nebol nahraný žiadny platný súbor'], 400);
+    }
+
+    $file = $_FILES['logo'];
+    $info = @getimagesize($file['tmp_name']);
+    if (!$info || !in_array($info[2], [IMAGETYPE_JPEG, IMAGETYPE_PNG, IMAGETYPE_WEBP])) {
+        send_json(['error' => 'Nepodporovaný formát loga (povolené: JPG, PNG, WEBP)'], 400);
+    }
+
+    $ext = ($info[2] === IMAGETYPE_PNG) ? 'png' : (($info[2] === IMAGETYPE_WEBP) ? 'webp' : 'jpg');
+    $fileName = 'logo_' . time() . '.' . $ext;
+    $targetPath = UPLOADS_DIR . '/' . $fileName;
+
+    ensure_dir(UPLOADS_DIR);
+    if (move_uploaded_file($file['tmp_name'], $targetPath)) {
+        $logoUrl = '/uploads/' . $fileName;
+        $s = read_settings();
+        $s['logoUrl'] = $logoUrl;
+        save_settings($s);
+        dlog("ADMIN LOGO UPLOAD: saved $logoUrl");
+        send_json(['success' => true, 'url' => $logoUrl]);
+    } else {
+        send_json(['error' => 'Nepodarilo sa uložiť logo na server'], 500);
+    }
+}
+
+// ============================================================
 // === ADMIN: SYSTEM RESET (FACTORY RESET)
 // ============================================================
 if ($path === '/admin/system-reset' && $method === 'POST') {
-    dlog("ADMIN: system-reset requested");
+    $data = json_input();
+    if (($data['confirm'] ?? '') !== 'SYSTEM_RESET') {
+        send_json(['error' => 'Potvrdenie akcie zlyhalo. Vyžaduje sa confirm: SYSTEM_RESET.'], 400);
+    }
+
+    dlog("ADMIN: system-reset requested with valid confirmation");
     $currentToken = get_auth_token();
+
+    // Auto-backup všetkých dát pred resetom
+    ensure_dir(DATA_DIR . '/backups');
+    $dataFiles = ['settings.json', 'registrations.csv', 'ratings.csv', 'public_votes.csv', 'admins.json', 'evaluators.csv', 'tokens.json'];
+    foreach ($dataFiles as $df) {
+        $p = DATA_DIR . '/' . $df;
+        if (file_exists($p)) {
+            copy($p, DATA_DIR . '/backups/' . $df . '_before_reset_' . date('Ymd_His') . '.bak');
+        }
+    }
 
     // 1. Vyčistíme uploads a uploads/originals
     $uploadsDir = UPLOADS_DIR;
@@ -2096,26 +2323,26 @@ if ($path === '/admin/system-reset' && $method === 'POST') {
         }
     }
 
-    // 2. Reset databáz (ponecháme len hlavičky)
-    $regHeader = "id,author,email,instagram,webpage,address,category,name,description,webPath,originalPath,metadata,createdAt,shortlisted";
-    file_put_contents(REGISTRATIONS_CSV, $regHeader . "\n");
+    // 2. Reset databáz (správne a konzistentné hlavičky!)
+    $regHeader = "id,author,email,instagram,webpage,address,gdprConsent,rulesConsent,category,name,originalPath,webPath,description,metadata,createdAt,shortlisted";
+    file_put_contents(REGISTRATIONS_CSV, $regHeader . "\n", LOCK_EX);
 
-    $votesHeader = "photoId,ip,userAgent,timestamp";
-    file_put_contents(PUBLIC_VOTES_CSV, $votesHeader . "\n");
+    $votesHeader = "photoId,createdAt,voterId";
+    file_put_contents(PUBLIC_VOTES_CSV, $votesHeader . "\n", LOCK_EX);
 
-    $ratingsHeader = "judgeId,judgeName,photoId,score,timestamp";
-    file_put_contents(RATINGS_CSV, $ratingsHeader . "\n");
+    $ratingsHeader = "evalId,evalName,photoId,score,createdAt";
+    file_put_contents(RATINGS_CSV, $ratingsHeader . "\n", LOCK_EX);
 
     $evalCsvHeader = "id,name,role";
-    file_put_contents(EVALUATORS_CSV, $evalCsvHeader . "\n");
+    file_put_contents(EVALUATORS_CSV, $evalCsvHeader . "\n", LOCK_EX);
 
     $visitsHeader = "ip,userAgent,timestamp";
     if (file_exists(DATA_DIR . '/visits.csv')) {
-        file_put_contents(DATA_DIR . '/visits.csv', $visitsHeader . "\n");
+        file_put_contents(DATA_DIR . '/visits.csv', $visitsHeader . "\n", LOCK_EX);
     }
 
     if (file_exists(DATA_DIR . '/invitations.json')) {
-        file_put_contents(DATA_DIR . '/invitations.json', "[]");
+        file_put_contents(DATA_DIR . '/invitations.json', "[]", LOCK_EX);
     }
 
     // 3. Reset settings - vyčistíme priradené awards
@@ -2130,7 +2357,7 @@ if ($path === '/admin/system-reset' && $method === 'POST') {
         if ($currentToken && isset($tokens[$currentToken])) {
             $newTokens[$currentToken] = $tokens[$currentToken];
         }
-        file_put_contents(TOKENS_JSON, json_encode($newTokens, JSON_PRETTY_PRINT));
+        file_put_contents(TOKENS_JSON, json_encode($newTokens, JSON_PRETTY_PRINT), LOCK_EX);
     }
 
     dlog("ADMIN: system-reset completed successfully");

@@ -202,7 +202,11 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
     if (!confirm(lang === "sk" ? "VAROVANIE: Naozaj chcete zmazať ÚPLNE VŠETKY fotografie v súťaži?" : "WARNING: Do you really want to delete ALL photos in the contest?")) return;
 
     try {
-      const res = await fetchWithAuth("/api/admin/photos/delete-all", { method: "POST" });
+      const res = await fetchWithAuth("/api/admin/photos/delete-all", { 
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: "DELETE_ALL" })
+      });
       if (res.ok) {
         setSelectedPhotos([]);
         fetchData();
@@ -744,7 +748,11 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
     if (!confirm(msg)) return;
 
     try {
-      const res = await fetchWithAuth("/api/admin/system-reset", { method: "POST" });
+      const res = await fetchWithAuth("/api/admin/system-reset", { 
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: "SYSTEM_RESET" })
+      });
       const data = await res.json();
       if (res.ok) {
         alert(data.message);
