@@ -14,6 +14,7 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
   const [success, setSuccess] = useState(false);
   const [existingCounts, setExistingCounts] = useState<Record<string, number>>({});
   const [debugLoading, setDebugLoading] = useState(false);
+  const [timeLeft, setTimeLeft] = useState<{ days: number; hours: number; minutes: number; seconds: number } | null>(null);
   const [publicStats, setPublicStats] = useState<{ totalPhotos: number; uniqueAuthors: number; byCategory: Record<string, number>; totalVotes: number } | null>(null);
 
   const isSubmissionClosed = useMemo(() => {
