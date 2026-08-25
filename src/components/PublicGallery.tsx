@@ -11,7 +11,6 @@ interface PublicPhoto {
   webPath: string;
   description: string;
   voteCount?: number;
-  author?: string;
 }
 
 export default function PublicGallery({ lang, isIframe = false }: { lang: Lang, isIframe?: boolean }) {
@@ -22,7 +21,7 @@ export default function PublicGallery({ lang, isIframe = false }: { lang: Lang, 
   const [selectedPhoto, setSelectedPhoto] = useState<PublicPhoto | null>(null);
   const [filter, setFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
-  const [sortBy, setSortBy] = useState<"default" | "votes" | "name">("default");
+  const [sortBy, setSortBy] = useState<"default" | "votes">("default");
   const [copiedLink, setCopiedLink] = useState(false);
   const [publicStats, setPublicStats] = useState<{ totalPhotos: number; uniqueAuthors: number; byCategory: Record<string, number>; totalVotes: number } | null>(null);
   const [votingPhotoId, setVotingPhotoId] = useState<string | null>(null);
@@ -48,19 +47,16 @@ export default function PublicGallery({ lang, isIframe = false }: { lang: Lang, 
   }, [photos]);
 
   const filteredPhotos = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
     let list = photos.filter(p => {
       const matchCat = filter === "all" || p.category === filter;
-      const matchSearch = !searchQuery.trim() || 
-        (p.name && p.name.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (p.description && p.description.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (p.author && p.author.toLowerCase().includes(searchQuery.toLowerCase()));
+      // Anonymizované vyhľadávanie výhradne v texte popisu / príbehu fotografie
+      const matchSearch = !q || (p.description && p.description.toLowerCase().includes(q));
       return matchCat && matchSearch;
     });
 
     if (sortBy === "votes") {
       list = [...list].sort((a, b) => (b.voteCount || 0) - (a.voteCount || 0));
-    } else if (sortBy === "name") {
-      list = [...list].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
     }
 
     return list;
@@ -343,7 +339,7 @@ export default function PublicGallery({ lang, isIframe = false }: { lang: Lang, 
                 type="text" 
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                placeholder={lang === "sk" ? "Hľadať fotografiu / popis..." : "Search photo / description..."}
+                placeholder={lang === "sk" ? "Hľadať v popise fotografie..." : "Search photo description..."}
                 className="w-full pl-9 pr-8 py-2 bg-white border border-border text-xs outline-none focus:border-ink"
               />
               {searchQuery && (
@@ -365,7 +361,6 @@ export default function PublicGallery({ lang, isIframe = false }: { lang: Lang, 
               >
                 <option value="default">{lang === "sk" ? "Predvolené" : "Default"}</option>
                 <option value="votes">{lang === "sk" ? "Najviac hlasov" : "Most votes"}</option>
-                <option value="name">{lang === "sk" ? "Názov (A-Z)" : "Title (A-Z)"}</option>
               </select>
             </div>
           </div>
