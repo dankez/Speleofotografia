@@ -281,6 +281,129 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
       });
   }, [photos, photoFilter, searchQuery, galleryView]);
 
+  // Štatistika podľa kategórií (počet fotiek, autorov, popisy, priemerné body)
+  const categoryStats = useMemo(() => {
+    const total = photos.length || 1;
+    const catMap: Record<string, { id: string; name: string; photoCount: number; authors: Set<string>; withDesc: number; totalScore: number; ratedCount: number; totalVotes: number }> = {};
+    
+    // Predvolené kategórie zo settings
+    (settings.categories || [
+      { id: "A", nameSk: "Krása jaskýň", nameEn: "Beauty of Caves" },
+      { id: "B", nameSk: "Speleomoment", nameEn: "Speleomoment" }
+    ]).forEach(cat => {
+      catMap[cat.id] = {
+        id: cat.id,
+        name: lang === "sk" ? (cat.nameSk || cat.name || `Kategória ${cat.id}`) : (cat.nameEn || cat.name || `Category ${cat.id}`),
+        photoCount: 0,
+        authors: new Set<string>(),
+        withDesc: 0,
+        totalScore: 0,
+        ratedCount: 0,
+        totalVotes: 0,
+      };
+    });
+
+    photos.forEach(p => {
+      const c = p.category || "A";
+      if (!catMap[c]) {
+        catMap[c] = {
+          id: c,
+          name: `Kategória ${c}`,
+          photoCount: 0,
+          authors: new Set<string>(),
+          withDesc: 0,
+          totalScore: 0,
+          ratedCount: 0,
+          totalVotes: 0,
+        };
+      }
+      catMap[c].photoCount += 1;
+      const authorKey = (p.email || p.author || "").toLowerCase().trim();
+      if (authorKey) catMap[c].authors.add(authorKey);
+      if (p.description && p.description.trim().length > 0) catMap[c].withDesc += 1;
+      if ((p as any).scoreCount > 0) {
+        catMap[c].totalScore += (p as any).averageScore * (p as any).scoreCount;
+        catMap[c].ratedCount += (p as any).scoreCount;
+      }
+      if ((p as any).voteCount) {
+        catMap[c].totalVotes += (p as any).voteCount;
+      }
+    });
+
+    return Object.values(catMap).map(c => ({
+      id: c.id,
+      name: c.name,
+      photoCount: c.photoCount,
+      percentage: Math.round((c.photoCount / total) * 100),
+      authorCount: c.authors.size,
+      withDesc: c.withDesc,
+      avgScore: c.ratedCount > 0 ? (c.totalScore / c.ratedCount).toFixed(1) : "-",
+      totalVotes: c.totalVotes,
+    }));
+  }, [photos, settings.categories, lang]);
+
+  // Časová os a história nahrávania podľa dní
+  const timelineStats = useMemo(() => {
+    const dayMap: Record<string, { date: string; displayDate: string; count: number; authors: Set<string>; catA: number; catB: number }> = {};
+    
+    photos.forEach(p => {
+      let d = "";
+      if (p.createdAt) {
+        try {
+          d = new Date(p.createdAt).toISOString().split("T")[0];
+        } catch {
+          d = (p.createdAt || "").split("T")[0] || (p.createdAt || "").split(" ")[0];
+        }
+      }
+      if (!d || d === "undefined" || d.length < 8) d = "2026-05-24";
+
+      if (!dayMap[d]) {
+        const parts = d.split("-");
+        const displayDate = parts.length === 3 ? `${parseInt(parts[2], 10)}.${parseInt(parts[1], 10)}.` : d;
+        dayMap[d] = {
+          date: d,
+          displayDate,
+          count: 0,
+          authors: new Set<string>(),
+          catA: 0,
+          catB: 0,
+        };
+      }
+      dayMap[d].count += 1;
+      const authorKey = (p.email || p.author || "").toLowerCase().trim();
+      if (authorKey) dayMap[d].authors.add(authorKey);
+      if (p.category === "A") dayMap[d].catA += 1;
+      else if (p.category === "B") dayMap[d].catB += 1;
+    });
+
+    const sorted = Object.values(dayMap).sort((a, b) => a.date.localeCompare(b.date));
+    return sorted.map(s => ({
+      ...s,
+      authorCount: s.authors.size,
+    }));
+  }, [photos]);
+
+  // Súhrnné kľúčové ukazovatele
+  const summaryStats = useMemo(() => {
+    const total = photos.length;
+    const allAuthors = new Set(photos.map(p => (p.email || p.author || "").toLowerCase().trim()).filter(Boolean));
+    const authorCount = allAuthors.size || (dashboardStats?.uniqueAuthors || stats.uniqueEmails || 0);
+    const rated = photos.filter(p => ((p as any).scoreCount || 0) > 0).length;
+    const totalVotes = publicResults.reduce((a, p) => a + (p.voteCount || 0), 0) || (dashboardStats?.totalPublicVotes || 0);
+    const avgPerAuthor = authorCount > 0 ? (total / authorCount).toFixed(1) : "0";
+    const shortlisted = photos.filter(p => p.shortlisted).length;
+
+    return {
+      total,
+      authorCount,
+      avgPerAuthor,
+      rated,
+      ratedPercentage: total > 0 ? Math.round((rated / total) * 100) : 0,
+      totalVotes,
+      shortlisted,
+    };
+  }, [photos, dashboardStats, stats, publicResults]);
+
   useEffect(() => {
     // Initial data fetch if already authorized (e.g. from session)
     const token = localStorage.getItem("speleofoto_token");
@@ -1867,86 +1990,185 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
               <div className="p-6 bg-paper border border-border space-y-2">
                 <div className="flex justify-between items-center">
-                  <p className="text-[10px] font-bold uppercase text-muted tracking-widest">Total Photos</p>
+                  <p className="text-[10px] font-bold uppercase text-muted tracking-widest">
+                    {lang === "sk" ? "Fotografie celkom" : "Total Photos"}
+                  </p>
                   <ImageIcon size={16} className="text-muted" />
                 </div>
-                <p className="text-3xl font-light">{dashboardStats?.totalPhotos || stats.total || 0}</p>
+                <p className="text-3xl font-light">{summaryStats.total}</p>
+                <p className="text-[9px] text-muted font-medium uppercase">
+                  {lang === "sk" ? `V kategóriách A (${categoryStats.find(c => c.id === 'A')?.photoCount || 0}) / B (${categoryStats.find(c => c.id === 'B')?.photoCount || 0})` : `Cats A / B`}
+                </p>
               </div>
               <div className="p-6 bg-paper border border-border space-y-2">
                 <div className="flex justify-between items-center">
-                  <p className="text-[10px] font-bold uppercase text-muted tracking-widest">Authors</p>
+                  <p className="text-[10px] font-bold uppercase text-muted tracking-widest">
+                    {lang === "sk" ? "Unikátni autori" : "Authors"}
+                  </p>
                   <Users size={16} className="text-muted" />
                 </div>
-                <p className="text-3xl font-light">{dashboardStats?.uniqueAuthors || stats.uniqueEmails || 0}</p>
+                <p className="text-3xl font-light">{summaryStats.authorCount}</p>
+                <p className="text-[9px] text-muted font-medium uppercase">
+                  {lang === "sk" ? `Ø ${summaryStats.avgPerAuthor} fotiek / autor` : `Ø ${summaryStats.avgPerAuthor} photos / author`}
+                </p>
               </div>
               <div className="p-6 bg-paper border border-border space-y-2">
                 <div className="flex justify-between items-center">
-                  <p className="text-[10px] font-bold uppercase text-muted tracking-widest">Public Votes</p>
+                  <p className="text-[10px] font-bold uppercase text-muted tracking-widest">
+                    {lang === "sk" ? "Hodnotenie poroty" : "Jury Progress"}
+                  </p>
+                  <Sparkles size={16} className="text-muted" />
+                </div>
+                <p className="text-3xl font-light">{summaryStats.rated} <span className="text-sm font-normal text-muted">/ {summaryStats.total}</span></p>
+                <p className="text-[9px] text-muted font-medium uppercase">
+                  {summaryStats.ratedPercentage}% {lang === "sk" ? "ohodnotených diel" : "photos rated"}
+                </p>
+              </div>
+              <div className="p-6 bg-paper border border-border space-y-2">
+                <div className="flex justify-between items-center">
+                  <p className="text-[10px] font-bold uppercase text-muted tracking-widest">
+                    {lang === "sk" ? "Hlasy verejnosti" : "Public Votes"}
+                  </p>
                   <Heart size={16} className="text-muted" />
                 </div>
-                <p className="text-3xl font-light">{dashboardStats?.totalPublicVotes || 0}</p>
-              </div>
-              <div className="p-6 bg-paper border border-border space-y-2">
-                <div className="flex justify-between items-center">
-                  <p className="text-[10px] font-bold uppercase text-muted tracking-widest">Daily Access</p>
-                  <Activity size={16} className="text-muted" />
-                </div>
-                <p className="text-3xl font-light">{dashboardStats?.dailyAccess || 0}</p>
+                <p className="text-3xl font-light">{summaryStats.totalVotes}</p>
+                <p className="text-[9px] text-muted font-medium uppercase">
+                  {lang === "sk" ? "Hlasovanie návštevníkov" : "Visitor votes"}
+                </p>
               </div>
             </div>
 
-            {/* Daily Traffic Chart */}
-            <div className="p-8 bg-paper border border-border space-y-8">
+            {/* Štatistika podľa kategórií */}
+            <div className="space-y-4">
+              <div className="flex items-center justify-between border-b border-border pb-2">
+                <h3 className="text-[11px] font-bold uppercase tracking-[2px] text-muted flex items-center gap-2">
+                  <BarChart3 size={14} className="text-ink" />
+                  {lang === "sk" ? "Štatistika podľa kategórií" : "Category Breakdown"}
+                </h3>
+                <span className="text-[10px] font-bold text-muted uppercase tracking-widest">
+                  {categoryStats.length} {lang === "sk" ? "kategórie" : "categories"}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {categoryStats.map(cat => (
+                  <div key={cat.id} className="p-6 bg-white border border-border space-y-5 shadow-sm hover:border-ink transition-all">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <span className="inline-block px-2 py-0.5 bg-ink text-white text-[9px] font-bold uppercase tracking-widest rounded-xs mb-1.5">
+                          {lang === "sk" ? `Kategória ${cat.id}` : `Category ${cat.id}`}
+                        </span>
+                        <h4 className="text-sm font-bold tracking-tight">{cat.name}</h4>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-2xl font-light">{cat.photoCount}</span>
+                        <span className="text-[10px] text-muted font-bold block">{cat.percentage}% {lang === "sk" ? "z celku" : "of total"}</span>
+                      </div>
+                    </div>
+
+                    {/* Progress bar */}
+                    <div className="w-full bg-paper h-2.5 overflow-hidden border border-border/40 rounded-xs">
+                      <div 
+                        className={cn("h-full transition-all duration-500", cat.id === 'A' ? "bg-ink" : "bg-accent")} 
+                        style={{ width: `${cat.percentage}%` }} 
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2 pt-3 border-t border-border/50 text-[10px]">
+                      <div>
+                        <span className="text-muted block text-[9px] uppercase font-bold">{lang === "sk" ? "Autori" : "Authors"}</span>
+                        <span className="font-bold text-sm text-ink">{cat.authorCount}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted block text-[9px] uppercase font-bold">{lang === "sk" ? "S popisom" : "With story"}</span>
+                        <span className="font-bold text-sm text-ink">{cat.withDesc}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted block text-[9px] uppercase font-bold">{lang === "sk" ? "Ø Porota" : "Avg Score"}</span>
+                        <span className="font-bold text-sm text-accent">{cat.avgScore}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Časová os a história nahrávania diel podľa dní */}
+            <div className="p-8 bg-paper border border-border space-y-6">
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div className="space-y-1">
-                  <h4 className="text-[11px] font-bold uppercase tracking-[2px]">Aktivita za posledných 14 dní</h4>
-                  <p className="text-[9px] text-muted uppercase font-medium">Interaktívny prehľad návštevnosti a verejného hlasovania</p>
+                  <h4 className="text-[11px] font-bold uppercase tracking-[2px]">
+                    {lang === "sk" ? "Časová os nahrávania diel" : "Photo Submission Timeline"}
+                  </h4>
+                  <p className="text-[9px] text-muted uppercase font-medium">
+                    {lang === "sk" ? "Reálny počet nahratých fotografií a unikátnych autorov podľa jednotlivých dní" : "Uploaded photos and unique authors by date"}
+                  </p>
                 </div>
-                <div className="flex gap-4 text-[9px] uppercase font-bold text-muted">
-                  <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-ink rounded-xs" /> Návštevy</div>
-                  <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-accent rounded-xs" /> Hodnotenia</div>
+                <div className="flex flex-wrap items-center gap-4 text-[9px] uppercase font-bold text-muted">
+                  <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-ink rounded-xs" /> {lang === "sk" ? "Kat. A" : "Cat. A"}</div>
+                  <div className="flex items-center gap-1.5"><div className="w-3 h-3 bg-accent rounded-xs" /> {lang === "sk" ? "Kat. B" : "Cat. B"}</div>
                 </div>
               </div>
-              
-              <div className="h-64 flex items-end gap-1.5 md:gap-3 px-2 border-b border-border/30 relative">
-                {/* Y-Axis helper lines */}
-                {[0, 25, 50, 75, 100].map(line => (
-                  <div key={line} className="absolute left-0 right-0 border-t border-border/10 pointer-events-none" style={{ bottom: `${line}%` }} />
-                ))}
 
-                {(dashboardStats?.activity || []).map((data: any, i: number) => {
-                  const maxVal = Math.max(...dashboardStats.activity.map((d: any) => Math.max(d.visits, d.votes)), 1);
-                  return (
-                    <div key={i} className="flex-1 flex flex-col justify-end gap-1 group relative">
-                      {/* Tooltip */}
-                      <div className="absolute -top-16 left-1/2 -translate-x-1/2 bg-ink text-white text-[9px] p-2 opacity-0 group-hover:opacity-100 transition-all rounded shadow-xl z-20 pointer-events-none whitespace-nowrap">
-                        <p className="font-bold border-b border-white/20 pb-1 mb-1">{data.day}</p>
-                        <p className="flex justify-between gap-4"><span>Visits:</span> <b>{data.visits}</b></p>
-                        <p className="flex justify-between gap-4"><span>Votes:</span> <b>{data.votes}</b></p>
-                      </div>
+              {timelineStats.length === 0 ? (
+                <div className="h-48 flex items-center justify-center text-muted text-xs">
+                  {lang === "sk" ? "Zatiaľ žiadne záznamy o nahrávaní" : "No submission records yet"}
+                </div>
+              ) : (
+                <div className="h-64 flex items-end gap-2 md:gap-4 px-2 border-b border-border/30 relative pt-8">
+                  {/* Y-Axis guide lines */}
+                  {[0, 25, 50, 75, 100].map(line => (
+                    <div key={line} className="absolute left-0 right-0 border-t border-border/10 pointer-events-none" style={{ bottom: `${line}%` }} />
+                  ))}
 
-                      {/* Bars */}
-                      <div className="flex items-end gap-[2px] h-full">
-                        <div 
-                          className="flex-1 bg-ink/20 group-hover:bg-ink transition-colors rounded-t-[1px]" 
-                          style={{ height: `${(data.visits / maxVal) * 100}%` }} 
-                        />
-                        <div 
-                          className="flex-1 bg-accent/20 group-hover:bg-accent transition-colors rounded-t-[1px]" 
-                          style={{ height: `${(data.votes / maxVal) * 100}%` }} 
-                        />
-                      </div>
-                      
-                      {/* Label - show only every 3rd day or first/last to avoid clutter */}
-                      {(i === 0 || i === 13 || i % 3 === 0) && (
-                        <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-[8px] text-muted font-bold uppercase rotate-45 origin-left whitespace-nowrap">
-                          {data.day.split('-').slice(1).join('/')}
+                  {(() => {
+                    const maxCount = Math.max(...timelineStats.map(t => t.count), 1);
+                    return timelineStats.map((item, idx) => (
+                      <div key={idx} className="flex-1 flex flex-col justify-end items-center h-full group relative min-w-[28px]">
+                        {/* Tooltip */}
+                        <div className="absolute -top-20 left-1/2 -translate-x-1/2 bg-ink text-white text-[9px] p-2.5 opacity-0 group-hover:opacity-100 transition-all rounded shadow-2xl z-30 pointer-events-none whitespace-nowrap">
+                          <p className="font-bold border-b border-white/20 pb-1 mb-1">{item.date}</p>
+                          <p className="flex justify-between gap-4"><span>{lang === "sk" ? "Celkom diel:" : "Total photos:"}</span> <b>{item.count}</b></p>
+                          <p className="flex justify-between gap-4 text-white/80"><span>Kat A / Kat B:</span> <b>{item.catA} / {item.catB}</b></p>
+                          <p className="flex justify-between gap-4 text-accent"><span>{lang === "sk" ? "Autori:" : "Authors:"}</span> <b>{item.authorCount}</b></p>
                         </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+
+                        {/* Bar container */}
+                        <div className="w-full max-w-[36px] flex flex-col justify-end h-full">
+                          {/* Number on top of bar */}
+                          <span className="text-[9px] font-bold text-center text-ink/70 mb-1 group-hover:text-ink">
+                            {item.count}
+                          </span>
+                          {/* Stacked bar: Cat A + Cat B */}
+                          <div 
+                            className="w-full flex flex-col justify-end bg-ink/10 rounded-t-[2px] overflow-hidden group-hover:ring-2 group-hover:ring-ink transition-all"
+                            style={{ height: `${Math.max(12, (item.count / maxCount) * 80)}%` }}
+                          >
+                            {item.catB > 0 && (
+                              <div 
+                                className="w-full bg-accent hover:opacity-90 transition-all" 
+                                style={{ height: `${(item.catB / item.count) * 100}%` }} 
+                                title={`Kat B: ${item.catB}`}
+                              />
+                            )}
+                            {item.catA > 0 && (
+                              <div 
+                                className="w-full bg-ink hover:opacity-90 transition-all" 
+                                style={{ height: `${(item.catA / item.count) * 100}%` }} 
+                                title={`Kat A: ${item.catA}`}
+                              />
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Date label */}
+                        <span className="mt-2 text-[8px] text-muted font-bold uppercase truncate max-w-full">
+                          {item.displayDate}
+                        </span>
+                      </div>
+                    ));
+                  })()}
+                </div>
+              )}
             </div>
 
             {/* Public Ranking Mini-View */}
