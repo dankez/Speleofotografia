@@ -87,8 +87,8 @@ KROK 2: PRAVA NA PRIECINKY (cez FTP klienta alebo WebSupport panel)
 
 KROK 3: OVERENIE
 ----------------
-1. Otvorte: https://speleof26.sss.sk/api/debug
-   - Musi byt: VERZIA API: 3.1
+1. Otvorte: https://speleof26.sss.sk/api/debug (prihláste sa v admine pre zobrazenie)
+   - Musi byt: VERZIA API: 3.4
    - Musi byt: GD KNIZNICA: DOSTUPNA
    - Musi byt: UPLOADS ZAPISATELNY: ANO
 
