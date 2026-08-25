@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, ChangeEvent } from "react";
-import { BarChart3, Users, Image as ImageIcon, Link as LinkIcon, Plus, Copy, Check, Download, Trash2, Eye, Shield, Settings as SettingsIcon, Mail, UserPlus, Heart, Code, ExternalLink, X, User, LayoutGrid, List, Search, Edit2, TrendingUp, Activity, FileText, Zap, Upload, AlertTriangle, Sparkles, RotateCw, ArrowUpDown, ArrowUp, ArrowDown, Clock, ChevronLeft, ChevronRight } from "lucide-react";
+import { BarChart3, Users, Image as ImageIcon, Link as LinkIcon, Plus, Copy, Check, Download, Trash2, Eye, Shield, Settings as SettingsIcon, Mail, UserPlus, Heart, Code, ExternalLink, X, User, LayoutGrid, List, Search, Edit2, TrendingUp, Activity, FileText, Zap, Upload, AlertTriangle, Sparkles, RotateCw, ArrowUpDown, ArrowUp, ArrowDown, Clock, ChevronLeft, ChevronRight, Printer, Send } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/src/lib/utils";
 import type { Photo, Evaluator } from "../types";
@@ -72,6 +72,9 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
   const [stats, setStats] = useState<any>({ total: 0, uniqueEmails: 0 });
   const [dashboardStats, setDashboardStats] = useState<any>(null);
   const [newEvalName, setNewEvalName] = useState("");
+  const [newEvalEmail, setNewEvalEmail] = useState("");
+  const [sendingInviteId, setSendingInviteId] = useState<string | null>(null);
+  const [showPrintProtocol, setShowPrintProtocol] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"stats" | "photos" | "evaluators" | "embed" | "settings" | "stress">("stats");
@@ -936,15 +939,48 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
     }
   };
 
+  const sendEvalInvite = async (evalId: string, email?: string) => {
+    let targetEmail = email;
+    if (!targetEmail) {
+      const input = prompt(lang === "sk" ? "Zadajte emailovú adresu porotcu:" : "Enter jury member email address:");
+      if (!input || !input.trim()) return;
+      targetEmail = input.trim();
+    }
+    
+    setSendingInviteId(evalId);
+    try {
+      const res = await fetchWithAuth("/api/admin/evaluators/send-invite", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: evalId, email: targetEmail })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert(lang === "sk" ? `Pozvánka bola úspešne odoslaná na ${targetEmail}` : `Invitation successfully sent to ${targetEmail}`);
+      } else {
+        alert(data.error || (lang === "sk" ? "Chyba pri odosielaní emailu" : "Failed to send email"));
+      }
+    } catch (e) {
+      alert(lang === "sk" ? "Chyba pripojenia k serveru" : "Connection error");
+    } finally {
+      setSendingInviteId(null);
+    }
+  };
+
   const createEvaluator = async () => {
-    if (!newEvalName) return;
+    if (!newEvalName.trim()) return;
     const res = await fetchWithAuth("/api/evaluators", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: newEvalName })
+      body: JSON.stringify({ name: newEvalName.trim() })
     });
     if (res.ok) {
+      const data = await res.json();
+      if (newEvalEmail.trim() && data.id) {
+        await sendEvalInvite(data.id, newEvalEmail.trim());
+      }
       setNewEvalName("");
+      setNewEvalEmail("");
       fetchData();
     }
   };
@@ -2332,6 +2368,28 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                 {lang === "sk" ? "Exporty a výstupy" : "Exports & Downloads"}
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Oficiálna Zápisnica poroty (Tlač / PDF) */}
+                <div className="p-5 bg-gradient-to-br from-slate-900 to-slate-800 text-white border border-slate-700 flex flex-col justify-between space-y-4 shadow-md md:col-span-2">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                    <div className="space-y-1">
+                      <h4 className="text-[13px] font-bold uppercase tracking-wider text-amber-400 flex items-center gap-2">
+                        <Printer size={16} /> {lang === "sk" ? "Oficiálna Zápisnica poroty (Tlač / PDF Protokol)" : "Official Jury Evaluation Protocol (Print / PDF)"}
+                      </h4>
+                      <p className="text-[11px] text-slate-300 leading-relaxed max-w-2xl">
+                        {lang === "sk" 
+                          ? "Generuje kompletnú tlačovú zápisnicu s hlavičkou súťaže, poradím fotografií podľa priemeru, udelenými cenami a podpisovými hárkami pre porotcov." 
+                          : "Generates a complete printable evaluation protocol with competition header, photo standings, assigned awards, and jury signature lines."}
+                      </p>
+                    </div>
+                    <button 
+                      onClick={() => setShowPrintProtocol(true)}
+                      className="px-6 py-3 bg-amber-400 hover:bg-amber-300 text-slate-950 text-[11px] font-bold uppercase tracking-widest transition-all shrink-0 flex items-center gap-2 shadow-sm"
+                    >
+                      <Printer size={14} /> {lang === "sk" ? "Otvoriť Zápisnicu" : "Open Protocol"}
+                    </button>
+                  </div>
+                </div>
+
                 {/* Výsledky Poroty */}
                 <div className="p-5 bg-white border border-border flex flex-col justify-between space-y-4 shadow-sm">
                   <div className="space-y-1">
@@ -3562,56 +3620,292 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
         )}
 
         {activeTab === "evaluators" && (
-          <div className="max-w-3xl space-y-12">
-            <div className="border border-border p-8 space-y-6 bg-white">
+          <div className="max-w-4xl space-y-8">
+            {/* Header actions */}
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-paper p-6 border border-border">
+              <div className="space-y-1">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-ink">
+                  {lang === "sk" ? "Správa poroty a hodnotenia" : "Jury Management & Evaluation"}
+                </h3>
+                <p className="text-xs text-muted">
+                  {lang === "sk" 
+                    ? "Generujte prístupové odkazy pre porotcov a odosielajte pozvánky priamo emailom." 
+                    : "Generate private evaluation links and send invitations directly via email."}
+                </p>
+              </div>
+              <button 
+                onClick={() => setShowPrintProtocol(true)}
+                className="px-6 py-3 bg-ink text-white text-[10px] font-bold uppercase tracking-widest flex items-center gap-2 hover:opacity-90 transition-opacity shrink-0"
+              >
+                <Printer size={14} /> {lang === "sk" ? "Tlačiť Zápisnicu Poroty (PDF)" : "Print Jury Protocol (PDF)"}
+              </button>
+            </div>
+
+            {/* Add Jury Member Card */}
+            <div className="border border-border p-6 md:p-8 space-y-6 bg-white shadow-sm">
               <label className="text-[11px] font-bold uppercase tracking-widest text-muted">
-                {lang === "sk" ? "Pridať člena poroty" : "Add Jury Member"}
+                {lang === "sk" ? "Pridať nového člena poroty" : "Add New Jury Member"}
               </label>
-              <div className="flex gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
                 <input 
                   type="text" 
                   value={newEvalName}
                   onChange={e => setNewEvalName(e.target.value)}
-                  placeholder={lang === "sk" ? "Meno porotcu" : "Jury Name"}
-                  className="flex-1 border border-border p-4 text-sm outline-none focus:border-ink"
+                  placeholder={lang === "sk" ? "Meno a priezvisko porotcu *" : "Jury Member Name *"}
+                  className="sm:col-span-6 border border-border p-3.5 text-sm outline-none focus:border-ink"
+                />
+                <input 
+                  type="email" 
+                  value={newEvalEmail}
+                  onChange={e => setNewEvalEmail(e.target.value)}
+                  placeholder={lang === "sk" ? "Email (voliteľný – odošle pozvánku)" : "Email (optional – sends invite)"}
+                  className="sm:col-span-4 border border-border p-3.5 text-sm outline-none focus:border-ink"
                 />
                 <button 
                   onClick={createEvaluator}
-                  className="px-8 py-4 bg-ink text-white text-[11px] font-bold uppercase tracking-[2px] shrink-0"
+                  disabled={!newEvalName.trim()}
+                  className="sm:col-span-2 px-4 py-3.5 bg-ink text-white text-[10px] font-bold uppercase tracking-[2px] hover:opacity-90 transition-opacity disabled:opacity-50"
                 >
-                  {lang === "sk" ? "Generovať Link" : "Generate Link"}
+                  {lang === "sk" ? "Pridať" : "Add"}
                 </button>
               </div>
             </div>
 
+            {/* Jury Registry Table */}
             <div className="space-y-4">
-              <h3 className="text-[11px] font-bold uppercase tracking-widest text-muted border-b border-border pb-2">
-                {lang === "sk" ? "Zápis poroty" : "Jury Registry"}
-              </h3>
-              <div className="divide-y divide-border border border-border bg-white text-xs">
-                {evaluators.map(evalu => (
-                  <div key={evalu.id} className="flex items-center justify-between p-6">
-                    <div className="space-y-1">
-                      <p className="font-bold uppercase tracking-widest">{evalu.name}</p>
-                      <p className="text-[9px] text-muted font-mono">{evalu.id}</p>
-                    </div>
-                    <button 
-                      onClick={() => copyEvalLink(evalu.id)}
-                      className={cn(
-                        "px-6 py-2 text-[9px] uppercase font-bold tracking-widest border border-border transition-all",
-                        copiedId === evalu.id ? "bg-accent text-white border-accent" : "hover:border-ink"
-                      )}
-                    >
-                      {copiedId === evalu.id ? (lang === "sk" ? "Skopírované" : "Copied") : (lang === "sk" ? "Kopírovať Link" : "Copy Link")}
-                    </button>
+              <div className="flex justify-between items-center border-b border-border pb-2">
+                <h3 className="text-[11px] font-bold uppercase tracking-widest text-muted">
+                  {lang === "sk" ? "Zoznam porotcov" : "Jury Registry"} ({evaluators.length})
+                </h3>
+              </div>
+              <div className="divide-y divide-border border border-border bg-white text-xs shadow-sm">
+                {evaluators.length === 0 ? (
+                  <div className="p-8 text-center text-muted">
+                    {lang === "sk" ? "Zatiaľ neboli pridaní žiadni členovia poroty." : "No jury members added yet."}
                   </div>
-                ))}
+                ) : (
+                  evaluators.map(evalu => (
+                    <div key={evalu.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-5 gap-4">
+                      <div className="space-y-1">
+                        <p className="font-bold uppercase tracking-wider text-ink text-sm">{evalu.name}</p>
+                        <div className="flex items-center gap-3 text-[10px] text-muted">
+                          <span className="font-mono bg-paper px-2 py-0.5 border border-border">ID: {evalu.id}</span>
+                          <span>{lang === "sk" ? "Hodnotených:" : "Rated:"} <strong>{evalu.ratedCount || 0}</strong> {lang === "sk" ? "fotografií" : "photos"}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 w-full sm:w-auto">
+                        <button 
+                          onClick={() => copyEvalLink(evalu.id)}
+                          className={cn(
+                            "flex-1 sm:flex-none px-4 py-2.5 text-[9px] uppercase font-bold tracking-widest border transition-all flex items-center justify-center gap-1.5",
+                            copiedId === evalu.id ? "bg-accent text-white border-accent" : "border-border hover:border-ink text-ink bg-white"
+                          )}
+                        >
+                          {copiedId === evalu.id ? <Check size={12} /> : <Copy size={12} />}
+                          {copiedId === evalu.id ? (lang === "sk" ? "Skopírované" : "Copied") : (lang === "sk" ? "Kopírovať Link" : "Copy Link")}
+                        </button>
+                        <button 
+                          onClick={() => sendEvalInvite(evalu.id)}
+                          disabled={sendingInviteId === evalu.id}
+                          className="flex-1 sm:flex-none px-4 py-2.5 text-[9px] uppercase font-bold tracking-widest border border-border bg-ink text-white hover:opacity-90 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+                        >
+                          {sendingInviteId === evalu.id ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+                          {sendingInviteId === evalu.id ? (lang === "sk" ? "Odosielam..." : "Sending...") : (lang === "sk" ? "Poslať Pozvánku" : "Send Invite")}
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </div>
         )}
       </div>
+
+      {/* Print Protocol Modal */}
+      <AnimatePresence>
+        {showPrintProtocol && (
+          <PrintProtocolModal 
+            lang={lang}
+            settings={settings}
+            evaluators={evaluators}
+            photos={photos}
+            onClose={() => setShowPrintProtocol(false)}
+          />
+        )}
+      </AnimatePresence>
     </div>
+  );
+}
+
+function PrintProtocolModal({ 
+  lang, 
+  settings, 
+  evaluators, 
+  photos, 
+  onClose 
+}: { 
+  lang: Lang; 
+  settings: ContestSettings; 
+  evaluators: Evaluator[]; 
+  photos: Photo[]; 
+  onClose: () => void; 
+}) {
+  const rankedPhotos = useMemo(() => {
+    return [...photos].sort((a, b) => {
+      const scoreA = a.averageScore || 0;
+      const scoreB = b.averageScore || 0;
+      if (scoreB !== scoreA) return scoreB - scoreA;
+      return (b.voteCount || 0) - (a.voteCount || 0);
+    });
+  }, [photos]);
+
+  const catAPhotos = useMemo(() => rankedPhotos.filter(p => p.category === 'A'), [rankedPhotos]);
+  const catBPhotos = useMemo(() => rankedPhotos.filter(p => p.category === 'B'), [rankedPhotos]);
+
+  const handlePrint = () => {
+    window.print();
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-50 bg-ink/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
+    >
+      <div className="bg-white max-w-5xl w-full max-h-[90vh] overflow-y-auto shadow-2xl p-6 sm:p-12 relative text-slate-900 font-sans print:max-w-none print:w-full print:max-h-none print:shadow-none print:p-0">
+        {/* Screen Top Bar */}
+        <div className="flex items-center justify-between border-b border-border pb-4 mb-8 print:hidden">
+          <div className="flex items-center gap-3">
+            <Printer className="text-accent" size={24} />
+            <div>
+              <h3 className="text-base font-bold uppercase tracking-wider text-ink">
+                {lang === "sk" ? "Tlačová Zápisnica Poroty" : "Jury Evaluation Protocol"}
+              </h3>
+              <p className="text-[11px] text-muted font-medium">
+                {lang === "sk" ? "Pripravené na tlač (A4) alebo uloženie do formátu PDF" : "Print-ready (A4) or save as PDF"}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={handlePrint}
+              className="px-6 py-2.5 bg-ink text-white text-xs font-bold uppercase tracking-widest flex items-center gap-2 hover:opacity-90 transition-opacity"
+            >
+              <Printer size={14} /> {lang === "sk" ? "Vytlačiť / PDF" : "Print / PDF"}
+            </button>
+            <button 
+              onClick={onClose}
+              className="p-2 text-muted hover:text-ink transition-colors"
+            >
+              <X size={20} />
+            </button>
+          </div>
+        </div>
+
+        {/* PRINTABLE DOCUMENT BODY */}
+        <div className="space-y-8 print:space-y-6 text-slate-900">
+          {/* Header */}
+          <div className="text-center border-b-2 border-slate-900 pb-6 space-y-2">
+            <p className="text-[10px] uppercase font-bold tracking-[3px] text-slate-500">
+              {lang === "sk" ? settings.museumNameSk : settings.museumNameEn} • Slovenská speleologická spoločnosť
+            </p>
+            <h1 className="text-2xl sm:text-3xl font-extrabold uppercase tracking-tight text-slate-900">
+              {settings.contestNameSk || "Speleofotografia 2026"} – {settings.edition || "23. ročník"}
+            </h1>
+            <h2 className="text-sm uppercase font-bold tracking-[2px] text-amber-700">
+              {lang === "sk" ? "OFICIÁLNA ZÁPISNICA Z HODNOTENIA ODBORNEJ POROTY" : "OFFICIAL JURY EVALUATION PROTOCOL"}
+            </h2>
+            <p className="text-[11px] text-slate-600">
+              {lang === "sk" ? "Dátum vyhotovenia:" : "Date of Issue:"} <strong>{new Date().toLocaleDateString(lang === "sk" ? "sk-SK" : "en-US", { year: 'numeric', month: 'long', day: 'numeric' })}</strong>
+            </p>
+          </div>
+
+          {/* Stats Summary */}
+          <div className="grid grid-cols-4 gap-3 text-center border border-slate-300 p-3 bg-slate-50">
+            <div>
+              <p className="text-[9px] uppercase font-bold text-slate-500">{lang === "sk" ? "Celkom fotografií" : "Total Photos"}</p>
+              <p className="text-base font-bold text-slate-900">{photos.length}</p>
+            </div>
+            <div>
+              <p className="text-[9px] uppercase font-bold text-slate-500">{lang === "sk" ? "Počet porotcov" : "Jury Members"}</p>
+              <p className="text-base font-bold text-slate-900">{evaluators.length}</p>
+            </div>
+            <div>
+              <p className="text-[9px] uppercase font-bold text-slate-500">{lang === "sk" ? "Kategória A / B" : "Category A / B"}</p>
+              <p className="text-base font-bold text-slate-900">{catAPhotos.length} / {catBPhotos.length}</p>
+            </div>
+            <div>
+              <p className="text-[9px] uppercase font-bold text-slate-500">{lang === "sk" ? "Verejné hlasy" : "Public Votes"}</p>
+              <p className="text-base font-bold text-amber-700">
+                {photos.reduce((acc, p) => acc + (p.voteCount || 0), 0)}
+              </p>
+            </div>
+          </div>
+
+          {/* Jury Members list */}
+          <div className="space-y-1">
+            <h4 className="text-[10px] uppercase font-bold tracking-wider text-slate-700 border-b border-slate-300 pb-1">
+              {lang === "sk" ? "Zloženie odbornej poroty:" : "Jury Committee:"}
+            </h4>
+            <p className="text-xs text-slate-800">
+              {evaluators.map(e => e.name).join(" • ") || (lang === "sk" ? "Zoznam porotcov je v registri." : "Jury members registry.")}
+            </p>
+          </div>
+
+          {/* TOP Standings Table */}
+          <div className="space-y-2">
+            <h4 className="text-[11px] uppercase font-bold tracking-wider text-slate-900 border-b-2 border-slate-900 pb-1">
+              {lang === "sk" ? "Celkové poradie fotografií podľa bodovania poroty" : "Overall Photo Standings by Jury Score"}
+            </h4>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-400 bg-slate-100 text-[9px] uppercase font-extrabold text-slate-700">
+                    <th className="py-2 px-2 w-12 text-center">#</th>
+                    <th className="py-2 px-2">{lang === "sk" ? "Názov fotografie" : "Photo Title"}</th>
+                    <th className="py-2 px-2 w-16 text-center">{lang === "sk" ? "Kat." : "Cat."}</th>
+                    <th className="py-2 px-2">{lang === "sk" ? "Autor" : "Author"}</th>
+                    <th className="py-2 px-2 text-right w-24">{lang === "sk" ? "Priemer body" : "Avg Score"}</th>
+                    <th className="py-2 px-2 text-center w-20">{lang === "sk" ? "Počet hodn." : "Votes"}</th>
+                    <th className="py-2 px-2 text-right w-24">{lang === "sk" ? "Cena verejnosti" : "Public Choice"}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {rankedPhotos.map((p, idx) => (
+                    <tr key={p.id} className={cn(idx < 3 ? "bg-amber-50/50 font-medium" : "")}>
+                      <td className="py-1.5 px-2 text-center font-bold text-slate-700">{idx + 1}.</td>
+                      <td className="py-1.5 px-2 font-medium text-slate-900">{p.name || "Bez názvu"}</td>
+                      <td className="py-1.5 px-2 text-center font-mono text-[10px]">{p.category}</td>
+                      <td className="py-1.5 px-2 text-slate-700">{p.author || "Anonym"}</td>
+                      <td className="py-1.5 px-2 text-right font-bold text-slate-900">{(p.averageScore || 0).toFixed(2)}</td>
+                      <td className="py-1.5 px-2 text-center text-slate-600 text-[10px]">{p.scoreCount || 0}</td>
+                      <td className="py-1.5 px-2 text-right text-slate-600 font-mono text-[10px]">{p.voteCount || 0} hl.</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Signatures Section */}
+          <div className="pt-8 border-t-2 border-slate-900 space-y-6">
+            <h4 className="text-[10px] uppercase font-bold tracking-wider text-slate-700">
+              {lang === "sk" ? "Podpisy členov odbornej poroty:" : "Jury Member Signatures:"}
+            </h4>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-8 pt-4">
+              {evaluators.map((evalu) => (
+                <div key={evalu.id} className="space-y-8 text-center border-t border-slate-400 pt-2">
+                  <p className="text-xs font-bold uppercase text-slate-800">{evalu.name}</p>
+                  <p className="text-[9px] text-slate-400 uppercase tracking-widest">{lang === "sk" ? "podpis" : "signature"}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </motion.div>
   );
 }
 

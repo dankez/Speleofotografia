@@ -420,9 +420,23 @@ if ($path === '/settings' && $method === 'GET') {
 
 if ($path === '/stats' && $method === 'GET') {
     $photos = read_registrations();
+    $byCategory = [];
+    foreach ($photos as $p) {
+        $cat = $p['category'] ?? 'A';
+        $byCategory[$cat] = ($byCategory[$cat] ?? 0) + 1;
+    }
+    
+    $publicVotesCount = 0;
+    if (file_exists(PUBLIC_VOTES_CSV)) {
+        $vlines = file(PUBLIC_VOTES_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        $publicVotesCount = max(0, count($vlines) - 1);
+    }
+
     send_json([
-        'total' => count($photos),
-        'uniqueEmails' => count(array_unique(array_column($photos, 'email'))),
+        'totalPhotos'    => count($photos),
+        'uniqueAuthors'  => count(array_unique(array_filter(array_column($photos, 'email')))),
+        'byCategory'     => $byCategory,
+        'totalVotes'     => $publicVotesCount,
     ]);
 }
 
@@ -685,6 +699,43 @@ if ($path === '/register' && $method === 'POST') {
     require_once 'ImageProcessor.php';
 
     $s = read_settings();
+    $now = new DateTime();
+    $status = $s['contestStatus'] ?? 'submissions';
+    
+    // 1. Kontrola stavu súťaže
+    if ($status !== 'submissions') {
+        dlog("REGISTER REJECTED: contestStatus=$status");
+        send_json([
+            'success' => false,
+            'error' => ($status === 'results' ? 'Súťaž je už ukončená.' : 'Prihlasovanie fotografií do súťaže je momentálne uzavreté.')
+        ], 403);
+    }
+
+    // 2. Kontrola termínu uzávierky
+    if (!empty($s['submissionEnd'])) {
+        $end = new DateTime($s['submissionEnd'] . ' 23:59:59');
+        if ($now > $end) {
+            dlog("REGISTER REJECTED: deadline passed (" . $end->format('Y-m-d H:i') . ")");
+            send_json([
+                'success' => false,
+                'error' => 'Termín na prihlasovanie fotografií vypršal dňa ' . $end->format('d. m. Y') . '.'
+            ], 403);
+        }
+    }
+
+    // Normalizácia $_FILES
+    $fileList = [];
+    $f = $_FILES['photos'];
+    if (is_array($f['name'])) {
+        for ($i = 0; $i < count($f['name']); $i++) {
+            $fileList[] = ['name' => $f['name'][$i], 'tmp_name' => $f['tmp_name'][$i], 'error' => $f['error'][$i]];
+        }
+    } else {
+        $fileList[] = $f;
+    }
+
+    dlog("REGISTER: Pocet suborov=" . count($fileList));
+
     $photoInfos = json_decode($_POST['photoInfo'] ?? '[]', true) ?? [];
     $author = trim($_POST['author'] ?? 'Anonym');
     $authorEmail = strtolower(trim($_POST['email'] ?? ''));
@@ -725,19 +776,6 @@ if ($path === '/register' && $method === 'POST') {
     ensure_dir(UPLOADS_DIR);
     ensure_dir(ORIGINALS_DIR);
     ensure_csv(REGISTRATIONS_CSV, 'id,author,email,instagram,webpage,address,gdprConsent,rulesConsent,category,name,originalPath,webPath,description,metadata,createdAt,shortlisted');
-
-    // Normalizácia $_FILES
-    $fileList = [];
-    $f = $_FILES['photos'];
-    if (is_array($f['name'])) {
-        for ($i = 0; $i < count($f['name']); $i++) {
-            $fileList[] = ['name' => $f['name'][$i], 'tmp_name' => $f['tmp_name'][$i], 'error' => $f['error'][$i]];
-        }
-    } else {
-        $fileList[] = $f;
-    }
-
-    dlog("REGISTER: Pocet suborov=" . count($fileList));
 
     $rows   = [];
     $errors = [];
@@ -1292,6 +1330,91 @@ if (preg_match('#^/evaluators/([^/]+)$#', $path, $m) && $method === 'DELETE') {
         send_json(['success' => true]);
     } else {
         send_json(['error' => 'Porotca nenájdený'], 404);
+    }
+}
+
+// ============================================================
+// === ADMIN: ODOSLANIE POZVÁNKY POROTCOVI EMAILOM
+// ============================================================
+if ($path === '/admin/evaluators/send-invite' && $method === 'POST') {
+    $data = json_input();
+    $id = trim($data['id'] ?? '');
+    $email = trim($data['email'] ?? '');
+
+    if (empty($id) || empty($email)) {
+        send_json(['error' => 'Chýba ID porotcu alebo emailová adresa'], 400);
+    }
+
+    $evaluators = read_evaluators();
+    $evaluator = null;
+    foreach ($evaluators as $ev) {
+        if ($ev['id'] === $id) {
+            $evaluator = $ev;
+            break;
+        }
+    }
+    if (!$evaluator) {
+        send_json(['error' => 'Porotca nenájdený'], 404);
+    }
+
+    $s = read_settings();
+    $contestName = $s['contestName'] ?? 'Speleofotografia 2026';
+    $evalName = $evaluator['name'];
+
+    $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https://' : 'http://';
+    $host = $_SERVER['HTTP_HOST'] ?? 'speleof26.sss.sk';
+    $evalLink = $protocol . $host . '/?eval=' . $id;
+
+    $subject = "Pozvánka do odbornej poroty – $contestName / Jury Invitation";
+    $htmlBody = <<<HTML
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #1a202c; background: #f8fafc; padding: 24px;">
+  <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+    <div style="background: #0f172a; padding: 24px; text-align: center;">
+      <h1 style="color: #f8fafc; margin: 0; font-size: 20px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;">$contestName</h1>
+      <p style="color: #94a3b8; margin: 4px 0 0 0; font-size: 12px; text-transform: uppercase; letter-spacing: 2px;">Odborná porota / Expert Jury</p>
+    </div>
+    
+    <div style="padding: 28px;">
+      <p style="font-size: 16px; margin-top: 0;">Vážený/á <strong>$evalName</strong>,</p>
+      <p style="font-size: 14px; color: #475569;">
+        Boli ste vymenovaný/á za člena odbornej poroty medzinárodnej súťaže <strong>$contestName</strong>.
+        Pripravili sme pre Vás zabezpečený prístup do hodnotiaceho rozhrania súťaže.
+      </p>
+      
+      <div style="background: #f1f5f9; border-left: 4px solid #eab308; padding: 16px; margin: 24px 0; border-radius: 4px;">
+        <p style="margin: 0 0 8px 0; font-size: 12px; font-weight: bold; text-transform: uppercase; color: #64748b;">Váš osobný hodnotiaci odkaz / Your private evaluation link:</p>
+        <p style="margin: 0; font-family: monospace; font-size: 13px; word-break: break-all; color: #0f172a;">$evalLink</p>
+      </div>
+
+      <div style="text-align: center; margin: 30px 0;">
+        <a href="$evalLink" style="display: inline-block; background: #0f172a; color: #ffffff; text-decoration: none; padding: 14px 28px; font-size: 13px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; border-radius: 6px;">
+          Otvoriť hodnotiaci portál / Open Portal
+        </a>
+      </div>
+
+      <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 24px 0;">
+      <p style="font-size: 12px; color: #64748b; margin: 0; line-height: 1.5;">
+        <em>English summary:</em> You have been invited to the jury for $contestName. Please use the button above or link to access your private evaluation interface and rate the competition photographs.
+      </p>
+    </div>
+    <div style="background: #f8fafc; border-top: 1px solid #e2e8f0; padding: 16px; text-align: center; font-size: 11px; color: #94a3b8;">
+      Slovenská speleologická spoločnosť & Slovenské múzeum ochrany prírody a jaskyniarstva
+    </div>
+  </div>
+</body>
+</html>
+HTML;
+
+    $sent = send_system_email($email, $subject, $htmlBody);
+    if ($sent) {
+        dlog("JURY INVITE SENT: evalId=$id, name=$evalName, email=$email");
+        send_json(['success' => true, 'message' => "Pozvánka bola úspešne odoslaná na $email"]);
+    } else {
+        dlog("JURY INVITE FAILED: evalId=$id, email=$email");
+        send_json(['error' => 'Nepodarilo sa odoslať pozvánku (skontrolujte nastavenie SMTP)'], 500);
     }
 }
 

@@ -14,7 +14,25 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
   const [success, setSuccess] = useState(false);
   const [existingCounts, setExistingCounts] = useState<Record<string, number>>({});
   const [debugLoading, setDebugLoading] = useState(false);
-  const [timeLeft, setTimeLeft] = useState<{ days: number; hours: number; minutes: number; seconds: number } | null>(null);
+  const [publicStats, setPublicStats] = useState<{ totalPhotos: number; uniqueAuthors: number; byCategory: Record<string, number>; totalVotes: number } | null>(null);
+
+  const isSubmissionClosed = useMemo(() => {
+    if (!settings) return false;
+    if (settings.contestStatus && settings.contestStatus !== "submissions") return true;
+    if (settings.submissionEnd) {
+      const end = new Date(settings.submissionEnd);
+      end.setHours(23, 59, 59, 999);
+      if (new Date() > end) return true;
+    }
+    return false;
+  }, [settings]);
+
+  useEffect(() => {
+    fetch("/api/stats")
+      .then(res => res.ok ? res.json() : null)
+      .then(data => { if (data) setPublicStats(data); })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!settings?.submissionEnd) return;
@@ -753,33 +771,74 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
         )}
       </AnimatePresence>
 
-      {/* Introduction */}
-      <div className="flex flex-col md:flex-row justify-between items-start gap-4">
-        <div className="space-y-2">
-          <p className="text-[11px] text-muted uppercase font-bold tracking-widest">
-            {settings?.edition} - {lang === "sk" ? settings?.museumNameSk : settings?.museumNameEn}
-          </p>
-          <div className="flex flex-col md:flex-row md:items-end gap-4">
-            <h2 className="text-3xl font-light tracking-tight">{lang === "sk" ? "Prihláška" : "Application Form"}</h2>
-            {timeLeft && (timeLeft.days > 0 || timeLeft.hours > 0 || timeLeft.minutes > 0 || timeLeft.seconds > 0) && (
-              <div className="flex items-center gap-2 mb-1 px-3 py-1.5 bg-red-50 border border-red-100 rounded-sm">
-                <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                <span className="text-[10px] font-bold uppercase tracking-widest text-red-600">
-                  {lang === "sk" ? "Uzávierka o:" : "Ends in:"} {timeLeft.days}d {timeLeft.hours}h {timeLeft.minutes}m {timeLeft.seconds}s
-                </span>
-              </div>
-            )}
+      {/* Introduction & Public Stats */}
+      <div className="space-y-6">
+        <div className="flex flex-col md:flex-row justify-between items-start gap-4">
+          <div className="space-y-2">
+            <p className="text-[11px] text-muted uppercase font-bold tracking-widest">
+              {settings?.edition} - {lang === "sk" ? settings?.museumNameSk : settings?.museumNameEn}
+            </p>
+            <div className="flex flex-col md:flex-row md:items-end gap-4">
+              <h2 className="text-3xl font-light tracking-tight">{lang === "sk" ? "Prihláška do súťaže" : "Application Form"}</h2>
+              {!isSubmissionClosed && timeLeft && (timeLeft.days > 0 || timeLeft.hours > 0 || timeLeft.minutes > 0 || timeLeft.seconds > 0) && (
+                <div className="flex items-center gap-2 mb-1 px-3 py-1.5 bg-red-50 border border-red-100 rounded-sm">
+                  <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-red-600">
+                    {lang === "sk" ? "Uzávierka o:" : "Ends in:"} {timeLeft.days}d {timeLeft.hours}h {timeLeft.minutes}m {timeLeft.seconds}s
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
+          {settings?.debugMode && (
+            <button 
+              onClick={generateTestData}
+              disabled={debugLoading}
+              className="flex items-center gap-2 px-4 py-2 border border-accent/20 bg-accent/5 text-[10px] font-bold uppercase tracking-widest text-accent hover:bg-accent/10 transition-all disabled:opacity-50"
+            >
+              {debugLoading ? <Loader2 className="animate-spin" size={14} /> : <FlaskConical size={14} />}
+              {lang === "sk" ? "Nahrať testovacie dáta (ADMIN)" : "Upload Test Data (ADMIN)"}
+            </button>
+          )}
         </div>
-        {settings?.debugMode && (
-          <button 
-            onClick={generateTestData}
-            disabled={debugLoading}
-            className="flex items-center gap-2 px-4 py-2 border border-accent/20 bg-accent/5 text-[10px] font-bold uppercase tracking-widest text-accent hover:bg-accent/10 transition-all disabled:opacity-50"
-          >
-            {debugLoading ? <Loader2 className="animate-spin" size={14} /> : <FlaskConical size={14} />}
-            {lang === "sk" ? "Nahrať testovacie dáta (ADMIN)" : "Upload Test Data (ADMIN)"}
-          </button>
+
+        {/* Live Public Stats Bar */}
+        {publicStats && publicStats.totalPhotos > 0 && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 bg-paper/60 border border-border">
+            <div className="text-center sm:text-left space-y-0.5">
+              <p className="text-[9px] uppercase font-bold text-muted tracking-wider">{lang === "sk" ? "Fotografií" : "Photos"}</p>
+              <p className="text-xl font-bold text-ink">{publicStats.totalPhotos}</p>
+            </div>
+            <div className="text-center sm:text-left space-y-0.5">
+              <p className="text-[9px] uppercase font-bold text-muted tracking-wider">{lang === "sk" ? "Autorov" : "Authors"}</p>
+              <p className="text-xl font-bold text-ink">{publicStats.uniqueAuthors}</p>
+            </div>
+            <div className="text-center sm:text-left space-y-0.5">
+              <p className="text-[9px] uppercase font-bold text-muted tracking-wider">{lang === "sk" ? "Kategórie A / B" : "Categories A / B"}</p>
+              <p className="text-xl font-bold text-ink">{(publicStats.byCategory?.A || 0)} / {(publicStats.byCategory?.B || 0)}</p>
+            </div>
+            <div className="text-center sm:text-left space-y-0.5">
+              <p className="text-[9px] uppercase font-bold text-muted tracking-wider">{lang === "sk" ? "Hlasov verejnosti" : "Public Votes"}</p>
+              <p className="text-xl font-bold text-accent">{publicStats.totalVotes}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Closed Submissions Alert */}
+        {isSubmissionClosed && (
+          <div className="p-6 bg-red-50 border border-red-200 rounded-sm flex items-start gap-4">
+            <AlertTriangle className="text-red-600 shrink-0 mt-0.5" size={24} />
+            <div className="space-y-1.5">
+              <h4 className="text-sm font-bold uppercase tracking-wider text-red-900">
+                {lang === "sk" ? "Prihlasovanie do súťaže je uzavreté" : "Submissions are currently closed"}
+              </h4>
+              <p className="text-xs text-red-700 leading-relaxed">
+                {lang === "sk" 
+                  ? "Termín na odosielanie prihlášok vypršal. Prebieha hodnotenie odbornej poroty a verejné hlasovanie v Galérii." 
+                  : "The deadline for photo submissions has ended. Jury evaluation and public choice voting are currently active."}
+              </p>
+            </div>
+          </div>
         )}
       </div>
 
@@ -1100,13 +1159,15 @@ export default function RegistrationForm({ lang, settings }: { lang: Lang, setti
             </p>
             <button
               onClick={handleSubmit}
-              disabled={loading || photos.length === 0}
+              disabled={loading || photos.length === 0 || isSubmissionClosed}
               className={cn(
-                "w-full md:w-80 py-4 bg-ink text-white text-[11px] font-bold uppercase tracking-[2px] transition-all hover:opacity-90 active:scale-[0.98]",
+                "w-full md:w-80 py-4 bg-ink text-white text-[11px] font-bold uppercase tracking-[2px] transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed",
                 loading && "opacity-80"
               )}
             >
-              {loading ? <Loader2 size={18} className="mx-auto animate-spin" /> : t.submit}
+              {isSubmissionClosed 
+                ? (lang === "sk" ? "Registrácia uzavretá" : "Submissions Closed")
+                : (loading ? <Loader2 size={18} className="mx-auto animate-spin" /> : t.submit)}
             </button>
           </div>
         </div>
