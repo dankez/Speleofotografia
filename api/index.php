@@ -114,7 +114,7 @@ if (strpos($path, '/admin') === 0 && !$isPublicAdminPath) {
 if ($path === '/evaluators' && ($method === 'POST' || $method === 'DELETE')) {
     check_auth();
 }
-if (preg_match('#^/evaluators/([^/]+)$#', $path) && $method === 'DELETE') {
+if (preg_match('#^/evaluators/([^/]+)$#', $path) && ($method === 'DELETE' || $method === 'PATCH' || $method === 'PUT')) {
     check_auth();
 }
 
@@ -186,13 +186,36 @@ function csv_row_to_photo($p) {
     ];
 }
 
+function get_csv_rows($filePath) {
+    if (!file_exists($filePath)) return [];
+    $rows = [];
+    $handle = fopen($filePath, 'r');
+    if (!$handle) return [];
+    while (($row = fgetcsv($handle)) !== false) {
+        $rows[] = $row;
+    }
+    fclose($handle);
+    return $rows;
+}
+
+function write_csv_rows($filePath, $rows) {
+    ensure_dir(dirname($filePath));
+    $handle = fopen($filePath, 'w');
+    if (!$handle) return false;
+    foreach ($rows as $row) {
+        fputcsv($handle, $row);
+    }
+    fclose($handle);
+    return true;
+}
+
 function read_registrations() {
     if (!file_exists(REGISTRATIONS_CSV)) return [];
-    $lines = file(REGISTRATIONS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-    array_shift($lines);
+    $rows = get_csv_rows(REGISTRATIONS_CSV);
+    if (empty($rows)) return [];
+    array_shift($rows); // Preskočiť hlavičku
     $photos = [];
-    foreach ($lines as $line) {
-        $p = str_getcsv($line);
+    foreach ($rows as $p) {
         $photo = csv_row_to_photo($p);
         if ($photo) $photos[] = $photo;
     }
@@ -820,25 +843,24 @@ if ($path === '/register' && $method === 'POST') {
 
         if (ImageProcessor::processDouble($file['tmp_name'], $origPath, $webPath, 1920, $watermark, $wFontSize, $wColor)) {
             dlog("FILE $i: OK");
-            $esc = fn($v) => '"' . str_replace('"', '""', $v) . '"';
-            $rows[] = implode(',', [
+            $rows[] = [
                 $id,
-                $esc($author),
-                $esc($_POST['email'] ?? ''),
-                $esc($_POST['instagram'] ?? ''),
-                $esc($_POST['webpage'] ?? ''),
-                $esc($_POST['address'] ?? ''),
+                $author,
+                $_POST['email'] ?? '',
+                $_POST['instagram'] ?? '',
+                $_POST['webpage'] ?? '',
+                $_POST['address'] ?? '',
                 ($_POST['gdprConsent'] === 'true' ? 'true' : 'false'),
                 ($_POST['rulesConsent'] === 'true' ? 'true' : 'false'),
-                $esc($category),
-                $esc($photoName ?: pathinfo($file['name'], PATHINFO_FILENAME)),
-                $esc($origFile),   // originalPath – bez vodoznaku
-                $esc($webFile),    // webPath – s vodoznakom, WebP
-                $esc($pInfo['description'] ?? ''),
-                '"{}"',
+                $category,
+                $photoName ?: pathinfo($file['name'], PATHINFO_FILENAME),
+                $origFile,   // originalPath – bez vodoznaku
+                $webFile,    // webPath – s vodoznakom, WebP
+                $pInfo['description'] ?? '',
+                '{}',
                 date('c'),
                 'false',           // predvolene NIE JE v shortliste
-            ]);
+            ];
         } else {
             dlog("FILE $i FAILED: ImageProcessor zlyhal");
             $errors[] = "Súbor {$file['name']}: chyba pri spracovaní (neplatný obrázok)";
@@ -846,7 +868,15 @@ if ($path === '/register' && $method === 'POST') {
     }
 
     if (!empty($rows)) {
-        file_put_contents(REGISTRATIONS_CSV, implode("\n", $rows) . "\n", FILE_APPEND | LOCK_EX);
+        $fp = fopen(REGISTRATIONS_CSV, 'a');
+        if ($fp) {
+            flock($fp, LOCK_EX);
+            foreach ($rows as $r) {
+                fputcsv($fp, $r);
+            }
+            flock($fp, LOCK_UN);
+            fclose($fp);
+        }
         dlog("REGISTER: Ulozene " . count($rows) . " zaznamov");
         send_json(['success' => true, 'count' => count($rows), 'errors' => $errors]);
     } else {
@@ -1250,19 +1280,39 @@ if ($path === '/admin/dashboard-stats' && $method === 'GET') {
 // Helper: read evaluators from dedicated evaluators.csv
 function read_evaluators() {
     if (!file_exists(EVALUATORS_CSV)) {
-        ensure_csv(EVALUATORS_CSV, 'id,name,role');
+        ensure_csv(EVALUATORS_CSV, 'id,name,email,role,submittedAt');
         return [];
     }
-    $lines = file(EVALUATORS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-    array_shift($lines); // remove header
+    $rows = get_csv_rows(EVALUATORS_CSV);
+    if (empty($rows)) return [];
+    array_shift($rows); // remove header
     $evals = [];
-    foreach ($lines as $line) {
-        $p = str_getcsv($line);
+    foreach ($rows as $p) {
         if (count($p) >= 2) {
+            $email = '';
+            $role = 'evaluator';
+            $submittedAt = '';
+            if (count($p) >= 5) {
+                $email = trim($p[2] ?? '');
+                $role = trim($p[3] ?? 'evaluator') ?: 'evaluator';
+                $submittedAt = trim($p[4] ?? '');
+            } elseif (count($p) === 4) {
+                $email = trim($p[2] ?? '');
+                $role = trim($p[3] ?? 'evaluator') ?: 'evaluator';
+            } elseif (count($p) === 3) {
+                if (filter_var(trim($p[2] ?? ''), FILTER_VALIDATE_EMAIL)) {
+                    $email = trim($p[2]);
+                } else {
+                    $role = trim($p[2]) ?: 'evaluator';
+                }
+            }
             $evals[] = [
-                'id' => $p[0],
-                'name' => $p[1],
-                'role' => $p[2] ?? 'evaluator'
+                'id'          => $p[0],
+                'name'        => $p[1],
+                'email'       => $email,
+                'role'        => $role,
+                'submittedAt' => $submittedAt,
+                'isLocked'    => !empty($submittedAt)
             ];
         }
     }
@@ -1274,18 +1324,23 @@ if ($path === '/evaluators' && $method === 'GET') {
     // Pridáme počet hodnotení pre každého porotcu
     $counts = [];
     if (file_exists(RATINGS_CSV)) {
-        $rlines = file(RATINGS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-        array_shift($rlines);
-        foreach ($rlines as $rl) {
-            $r = str_getcsv($rl);
-            $jid = $r[0] ?? '';
-            if ($jid) $counts[$jid] = ($counts[$jid] ?? 0) + 1;
+        $rRows = get_csv_rows(RATINGS_CSV);
+        if (!empty($rRows)) {
+            array_shift($rRows);
+            foreach ($rRows as $r) {
+                $jid = $r[0] ?? '';
+                if ($jid) $counts[$jid] = ($counts[$jid] ?? 0) + 1;
+            }
         }
     }
     $result = array_map(fn($e) => [
-        'id'         => $e['id'],
-        'name'       => $e['name'],
-        'ratedCount' => $counts[$e['id']] ?? 0,
+        'id'          => $e['id'],
+        'name'        => $e['name'],
+        'email'       => $e['email'] ?? '',
+        'role'        => $e['role'] ?? 'evaluator',
+        'ratedCount'  => $counts[$e['id']] ?? 0,
+        'submittedAt' => $e['submittedAt'] ?? '',
+        'isLocked'    => !empty($e['submittedAt']),
     ], $evals);
     send_json($result);
 }
@@ -1293,56 +1348,200 @@ if ($path === '/evaluators' && $method === 'GET') {
 if ($path === '/evaluators' && $method === 'POST') {
     $data = json_input();
     $name = trim($data['name'] ?? '');
+    $email = trim($data['email'] ?? '');
+    $role = trim($data['role'] ?? 'evaluator');
+    if (!in_array($role, ['evaluator', 'chairman'])) $role = 'evaluator';
     if (empty($name)) send_json(['error' => 'Meno porotcu je povinné'], 400);
 
     $id = bin2hex(random_bytes(8));
-    ensure_csv(EVALUATORS_CSV, 'id,name,role');
+    ensure_csv(EVALUATORS_CSV, 'id,name,email,role,submittedAt');
     
-    $esc = fn($v) => '"' . str_replace('"', '""', $v) . '"';
-    $row = implode(',', [$id, $esc($name), 'evaluator']) . "\n";
-    file_put_contents(EVALUATORS_CSV, $row, FILE_APPEND | LOCK_EX);
+    $rows = get_csv_rows(EVALUATORS_CSV);
+    if (empty($rows)) {
+        $rows = [['id', 'name', 'email', 'role', 'submittedAt']];
+    } else {
+        if (count($rows[0]) < 5) {
+            $rows[0] = ['id', 'name', 'email', 'role', 'submittedAt'];
+        }
+    }
+    $rows[] = [$id, $name, $email, $role, ''];
+    write_csv_rows(EVALUATORS_CSV, $rows);
 
-    dlog("EVALUATOR CREATE: id=$id name=$name");
-    send_json(['status' => 'ok', 'id' => $id, 'name' => $name]);
+    dlog("EVALUATOR CREATE: id=$id name=$name email=$email role=$role");
+    send_json(['status' => 'ok', 'id' => $id, 'name' => $name, 'email' => $email, 'role' => $role, 'submittedAt' => '', 'isLocked' => false]);
 }
 
+// ÚPRAVA POROTCU (Meno, Email, Role)
+if (preg_match('#^/evaluators/([^/]+)$#', $path, $m) && ($method === 'PATCH' || $method === 'PUT')) {
+    $evalId = $m[1];
+    $data = json_input();
+    $newName = isset($data['name']) ? trim($data['name']) : null;
+    $newEmail = isset($data['email']) ? trim($data['email']) : null;
+    $newRole = isset($data['role']) ? trim($data['role']) : null;
+
+    if ($newName === '') {
+        send_json(['error' => 'Meno porotcu nemôže byť prázdne'], 400);
+    }
+    if ($newRole !== null && !in_array($newRole, ['evaluator', 'chairman'])) {
+        $newRole = 'evaluator';
+    }
+
+    if (!file_exists(EVALUATORS_CSV)) {
+        send_json(['error' => 'Porotca nenájdený'], 404);
+    }
+
+    $rows = get_csv_rows(EVALUATORS_CSV);
+    if (empty($rows)) {
+        send_json(['error' => 'Porotca nenájdený'], 404);
+    }
+
+    $header = array_shift($rows);
+    if (count($header) < 5) $header = ['id', 'name', 'email', 'role', 'submittedAt'];
+
+    $found = false;
+    $updatedName = '';
+    $updatedEmail = '';
+    $updatedRole = 'evaluator';
+    $updatedSubmittedAt = '';
+
+    foreach ($rows as &$p) {
+        if (($p[0] ?? '') === $evalId) {
+            $found = true;
+            while (count($p) < 5) $p[] = '';
+            
+            if ($newName !== null) $p[1] = $newName;
+            if ($newEmail !== null) $p[2] = $newEmail;
+            if ($newRole !== null) $p[3] = $newRole;
+            
+            $updatedName = $p[1];
+            $updatedEmail = $p[2];
+            $updatedRole = $p[3] ?: 'evaluator';
+            $updatedSubmittedAt = $p[4] ?? '';
+            break;
+        }
+    }
+    unset($p);
+
+    if (!$found) {
+        send_json(['error' => 'Porotca nenájdený'], 404);
+    }
+
+    array_unshift($rows, $header);
+    write_csv_rows(EVALUATORS_CSV, $rows);
+
+    // Ak sa zmenilo meno, aktualizovať evalName aj v RATINGS_CSV
+    if ($newName !== null && file_exists(RATINGS_CSV)) {
+        $ratingsRows = get_csv_rows(RATINGS_CSV);
+        if (!empty($ratingsRows)) {
+            $rHeader = array_shift($ratingsRows);
+            $rUpdated = false;
+            foreach ($ratingsRows as &$r) {
+                if (($r[0] ?? '') === $evalId) {
+                    $r[1] = $newName;
+                    $rUpdated = true;
+                }
+            }
+            unset($r);
+            if ($rUpdated) {
+                array_unshift($ratingsRows, $rHeader);
+                write_csv_rows(RATINGS_CSV, $ratingsRows);
+            }
+        }
+    }
+
+    // Aktualizácia v admins.json ak existuje
+    if (file_exists(ADMINS_JSON)) {
+        $admins = json_decode(file_get_contents(ADMINS_JSON), true) ?: [];
+        $adminsUpdated = false;
+        foreach ($admins as &$a) {
+            if (($a['id'] ?? '') === $evalId) {
+                if ($newName !== null) $a['name'] = $newName;
+                if ($newEmail !== null) $a['email'] = $newEmail;
+                if ($newRole !== null) $a['role'] = $newRole;
+                $adminsUpdated = true;
+            }
+        }
+        unset($a);
+        if ($adminsUpdated) {
+            file_put_contents(ADMINS_JSON, json_encode($admins, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        }
+    }
+
+    dlog("EVALUATOR UPDATE: id=$evalId name=$updatedName email=$updatedEmail role=$updatedRole");
+    send_json(['success' => true, 'id' => $evalId, 'name' => $updatedName, 'email' => $updatedEmail, 'role' => $updatedRole]);
+}
+
+// ZMAZANIE POROTCU + VŠETKÝCH JEHO HODNOTENÍ
 if (preg_match('#^/evaluators/([^/]+)$#', $path, $m) && $method === 'DELETE') {
     $delId = $m[1];
     if (!file_exists(EVALUATORS_CSV)) send_json(['error' => 'Žiadni porotcovia'], 404);
 
-    $lines = file(EVALUATORS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-    $header = array_shift($lines);
+    $rows = get_csv_rows(EVALUATORS_CSV);
+    if (empty($rows)) send_json(['error' => 'Žiadni porotcovia'], 404);
+
+    $header = array_shift($rows);
     $remaining = [];
     $found = false;
+    $deletedName = '';
 
-    foreach ($lines as $line) {
-        $p = str_getcsv($line);
+    foreach ($rows as $p) {
         if (($p[0] ?? '') === $delId) {
             $found = true;
+            $deletedName = $p[1] ?? '';
         } else {
-            $remaining[] = $line;
+            $remaining[] = $p;
         }
     }
 
-    if ($found) {
-        file_put_contents(EVALUATORS_CSV, $header . "\n" . implode("\n", $remaining) . ($remaining ? "\n" : ""), LOCK_EX);
-        dlog("EVALUATOR DELETE: id=$delId");
-        send_json(['success' => true]);
-    } else {
+    if (!$found) {
         send_json(['error' => 'Porotca nenájdený'], 404);
     }
+
+    array_unshift($remaining, $header);
+    write_csv_rows(EVALUATORS_CSV, $remaining);
+
+    // ZMAZAŤ AJ VŠETKY HODNOTENIA TOHTO POROTCU Z RATINGS_CSV
+    $deletedRatingsCount = 0;
+    if (file_exists(RATINGS_CSV)) {
+        $rRows = get_csv_rows(RATINGS_CSV);
+        if (!empty($rRows)) {
+            $rHeader = array_shift($rRows);
+            $rRemaining = [];
+            foreach ($rRows as $r) {
+                if (($r[0] ?? '') === $delId) {
+                    $deletedRatingsCount++;
+                } else {
+                    $rRemaining[] = $r;
+                }
+            }
+            array_unshift($rRemaining, $rHeader);
+            write_csv_rows(RATINGS_CSV, $rRemaining);
+        }
+    }
+
+    // Ak existuje v admins.json (starý formát), vymazať aj odtiaľ
+    if (file_exists(ADMINS_JSON)) {
+        $admins = json_decode(file_get_contents(ADMINS_JSON), true) ?: [];
+        $adminsFiltered = array_values(array_filter($admins, fn($a) => ($a['id'] ?? '') !== $delId));
+        if (count($adminsFiltered) !== count($admins)) {
+            file_put_contents(ADMINS_JSON, json_encode($adminsFiltered, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        }
+    }
+
+    dlog("EVALUATOR & RATINGS DELETE: id=$delId name=$deletedName, deletedRatings=$deletedRatingsCount");
+    send_json(['success' => true, 'id' => $delId, 'deletedRatingsCount' => $deletedRatingsCount]);
 }
 
 // ============================================================
-// === ADMIN: ODOSLANIE POZVÁNKY POROTCOVI EMAILOM
+// === ADMIN: ODOSLANIE POZVÁNKY POROTCOVI EMAILOM (PREMIUM HTML)
 // ============================================================
 if ($path === '/admin/evaluators/send-invite' && $method === 'POST') {
     $data = json_input();
     $id = trim($data['id'] ?? '');
     $email = trim($data['email'] ?? '');
 
-    if (empty($id) || empty($email)) {
-        send_json(['error' => 'Chýba ID porotcu alebo emailová adresa'], 400);
+    if (empty($id)) {
+        send_json(['error' => 'Chýba ID porotcu'], 400);
     }
 
     $evaluators = read_evaluators();
@@ -1357,53 +1556,162 @@ if ($path === '/admin/evaluators/send-invite' && $method === 'POST') {
         send_json(['error' => 'Porotca nenájdený'], 404);
     }
 
+    // Ak email nebol v tele požiadavky, použiť uložený email porotcu
+    if (empty($email)) {
+        $email = $evaluator['email'] ?? '';
+    }
+
+    if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        send_json(['error' => 'Zadajte platnú emailovú adresu porotcu'], 400);
+    }
+
+    // Ak sa email zmenil alebo predtým chýbal, uložiť ho k porotcovi do CSV
+    if (empty($evaluator['email']) || $evaluator['email'] !== $email) {
+        $eRows = get_csv_rows(EVALUATORS_CSV);
+        if (!empty($eRows)) {
+            $eHeader = array_shift($eRows);
+            if (count($eHeader) < 4) $eHeader = ['id', 'name', 'email', 'role'];
+            foreach ($eRows as &$er) {
+                if (($er[0] ?? '') === $id) {
+                    while (count($er) < 4) $er[] = '';
+                    $er[2] = $email;
+                    break;
+                }
+            }
+            unset($er);
+            array_unshift($eRows, $eHeader);
+            write_csv_rows(EVALUATORS_CSV, $eRows);
+        }
+    }
+
     $s = read_settings();
     $contestName = $s['contestName'] ?? 'Speleofotografia 2026';
+    $edition = $s['edition'] ?? '23. ročník';
+    $museumName = $s['museumName'] ?? 'Slovenské múzeum ochrany prírody a jaskyniarstva';
     $evalName = $evaluator['name'];
+    $safeName = htmlspecialchars($evalName, ENT_QUOTES, 'UTF-8');
 
     $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https://' : 'http://';
     $host = $_SERVER['HTTP_HOST'] ?? 'speleof26.sss.sk';
     $evalLink = $protocol . $host . '/?eval=' . $id;
 
     $subject = "Pozvánka do odbornej poroty – $contestName / Jury Invitation";
+
     $htmlBody = <<<HTML
 <!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"></head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #1a202c; background: #f8fafc; padding: 24px;">
-  <div style="max-width: 600px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
-    <div style="background: #0f172a; padding: 24px; text-align: center;">
-      <h1 style="color: #f8fafc; margin: 0; font-size: 20px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;">$contestName</h1>
-      <p style="color: #94a3b8; margin: 4px 0 0 0; font-size: 12px; text-transform: uppercase; letter-spacing: 2px;">Odborná porota / Expert Jury</p>
-    </div>
-    
-    <div style="padding: 28px;">
-      <p style="font-size: 16px; margin-top: 0;">Vážený/á <strong>$evalName</strong>,</p>
-      <p style="font-size: 14px; color: #475569;">
-        Boli ste vymenovaný/á za člena odbornej poroty medzinárodnej súťaže <strong>$contestName</strong>.
-        Pripravili sme pre Vás zabezpečený prístup do hodnotiaceho rozhrania súťaže.
-      </p>
-      
-      <div style="background: #f1f5f9; border-left: 4px solid #eab308; padding: 16px; margin: 24px 0; border-radius: 4px;">
-        <p style="margin: 0 0 8px 0; font-size: 12px; font-weight: bold; text-transform: uppercase; color: #64748b;">Váš osobný hodnotiaci odkaz / Your private evaluation link:</p>
-        <p style="margin: 0; font-family: monospace; font-size: 13px; word-break: break-all; color: #0f172a;">$evalLink</p>
-      </div>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pozvánka do odbornej poroty - $contestName</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f4f6f8; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f4f6f8; padding: 35px 12px;">
+    <tr>
+      <td align="center">
+        <table width="100%" cellpadding="0" cellspacing="0" style="max-width: 620px; background-color: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 14px rgba(0,0,0,0.06); border: 1px solid #e2e8f0;">
+          <!-- HEADER -->
+          <tr>
+            <td style="background-color: #1e252b; padding: 35px 25px; text-align: center; border-bottom: 4px solid #e67e22;">
+              <div style="display: inline-block; background-color: #e67e22; color: #ffffff; font-size: 11px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; padding: 4px 14px; border-radius: 20px; margin-bottom: 14px;">
+                ODBORNÁ POROTA &bull; EXPERT JURY
+              </div>
+              <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 800; letter-spacing: 1.2px; text-transform: uppercase;">
+                $contestName
+              </h1>
+              <p style="margin: 8px 0 0 0; color: #bdc3c7; font-size: 13px; letter-spacing: 0.5px;">
+                $edition &bull; $museumName
+              </p>
+            </td>
+          </tr>
+          
+          <!-- CONTENT -->
+          <tr>
+            <td style="padding: 35px 28px; color: #2d3748; font-size: 15px; line-height: 1.6;">
+              <!-- GREETING -->
+              <p style="font-size: 17px; font-weight: 700; margin: 0 0 16px 0; color: #1a202c;">
+                Vážený/á $safeName,
+              </p>
+              <p style="margin: 0 0 18px 0; color: #334155;">
+                S radosťou Vás pozývame k pôsobeniu v <strong>odbornej porote</strong> súťaže <strong>$contestName</strong>. Vaša odbornosť a cit pre fotografiu pomôžu vybrať najlepšie snímky podzemného sveta pre reprezentačnú výstavu a tlačený katalóg.
+              </p>
 
-      <div style="text-align: center; margin: 30px 0;">
-        <a href="$evalLink" style="display: inline-block; background: #0f172a; color: #ffffff; text-decoration: none; padding: 14px 28px; font-size: 13px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; border-radius: 6px;">
-          Otvoriť hodnotiaci portál / Open Portal
-        </a>
-      </div>
+              <!-- ACCESS CREDENTIALS BOX -->
+              <div style="background-color: #fff9e6; border-left: 4px solid #f39c12; border-radius: 4px; padding: 18px 20px; margin: 24px 0;">
+                <div style="font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; color: #d35400; margin-bottom: 8px;">
+                  🔐 Váš osobný hodnotiaci prístup / Private Access
+                </div>
+                <table width="100%" cellpadding="0" cellspacing="0" style="font-size: 13px; color: #2d3748;">
+                  <tr>
+                    <td style="padding: 3px 0; font-weight: 600; width: 130px; color: #78350f;">Meno porotcu:</td>
+                    <td style="padding: 3px 0; font-weight: 700; color: #1e293b;">$safeName</td>
+                  </tr>
+                  <tr>
+                    <td style="padding: 3px 0; font-weight: 600; color: #78350f;">Identifikátor ID:</td>
+                    <td style="padding: 3px 0; font-family: monospace; font-size: 13px; color: #0f172a;">$id</td>
+                  </tr>
+                </table>
+              </div>
 
-      <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 24px 0;">
-      <p style="font-size: 12px; color: #64748b; margin: 0; line-height: 1.5;">
-        <em>English summary:</em> You have been invited to the jury for $contestName. Please use the button above or link to access your private evaluation interface and rate the competition photographs.
-      </p>
-    </div>
-    <div style="background: #f8fafc; border-top: 1px solid #e2e8f0; padding: 16px; text-align: center; font-size: 11px; color: #94a3b8;">
-      Slovenská speleologická spoločnosť & Slovenské múzeum ochrany prírody a jaskyniarstva
-    </div>
-  </div>
+              <!-- CTA BUTTON -->
+              <div style="text-align: center; margin: 32px 0;">
+                <a href="$evalLink" style="display: inline-block; background-color: #e67e22; color: #ffffff !important; text-decoration: none; padding: 16px 34px; border-radius: 6px; font-weight: 800; font-size: 14px; letter-spacing: 1px; text-transform: uppercase; box-shadow: 0 4px 12px rgba(230, 126, 34, 0.35);">
+                  ⭐ Otvoriť hodnotiaci portál / Open Portal
+                </a>
+                <p style="margin: 10px 0 0 0; font-size: 11px; color: #94a3b8;">
+                  Prihlásenie je zabezpečené automaticky cez odkaz, nevyžaduje sa žiadne heslo.
+                </p>
+              </div>
+
+              <!-- DIRECT LINK FALLBACK -->
+              <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 14px; margin: 20px 0;">
+                <p style="margin: 0 0 6px 0; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #64748b; letter-spacing: 0.5px;">
+                  Priama URL adresa prístupu (ak nefunguje tlačidlo):
+                </p>
+                <p style="margin: 0; font-family: monospace; font-size: 12px; word-break: break-all; color: #0369a1;">
+                  <a href="$evalLink" style="color: #0284c7; text-decoration: underline;">$evalLink</a>
+                </p>
+              </div>
+
+              <!-- INSTRUCTIONS BOX -->
+              <div style="background-color: #f8fafc; border-radius: 6px; padding: 18px 20px; margin: 24px 0; border: 1px solid #e2e8f0;">
+                <h3 style="margin: 0 0 10px 0; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: #334155;">
+                  ℹ️ Ako prebieha hodnotenie:
+                </h3>
+                <ul style="margin: 0; padding-left: 20px; font-size: 13.5px; color: #475569; line-height: 1.6;">
+                  <li style="margin-bottom: 6px;"><strong>Anonymita:</strong> Hodnotenie je 100% anonymizované, mená a pôvod autorov sú pred porotou skryté.</li>
+                  <li style="margin-bottom: 6px;"><strong>Bodovanie:</strong> Každej fotografii udeľujete body od <strong>1 do 10</strong>.</li>
+                  <li style="margin-bottom: 6px;"><strong>Kategórie:</strong> Samostatne hodnotíte kategóriu <em>A – Krása jaskýň</em> a <em>B – Speleomoment a činnosť človeka v jaskyni</em>.</li>
+                  <li style="margin-bottom: 0;"><strong>Automatické ukladanie:</strong> Každé hodnotenie sa ukladá okamžite. Portál môžete kedykoľvek zatvoriť a neskôr v hodnotení pokračovať.</li>
+                </ul>
+              </div>
+
+              <!-- ENGLISH SUMMARY -->
+              <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 30px 0;" />
+              <p style="font-size: 16px; font-weight: 700; margin: 0 0 10px 0; color: #1a202c;">
+                Dear $safeName,
+              </p>
+              <p style="font-size: 13.5px; color: #475569; margin: 0 0 14px 0; line-height: 1.6;">
+                You have been appointed as an expert jury member for <strong>$contestName</strong>. Please click the button above or use your private link to access the evaluation portal. Photographs are evaluated anonymously on a scale of 1 to 10 points. Your progress is saved automatically.
+              </p>
+            </td>
+          </tr>
+
+          <!-- FOOTER -->
+          <tr>
+            <td style="background-color: #f8fafc; border-top: 1px solid #e2e8f0; padding: 22px 25px; text-align: center; font-size: 12px; color: #94a3b8; line-height: 1.5;">
+              <p style="margin: 0 0 4px 0; font-weight: 600; color: #64748b;">
+                Slovenská speleologická spoločnosť &bull; Slovenské múzeum ochrany prírody a jaskyniarstva
+              </p>
+              <p style="margin: 0; font-size: 11px;">
+                V prípade otázok nás kontaktujte na <a href="mailto:admin@sss.sk" style="color: #e67e22; text-decoration: none;">admin@sss.sk</a>.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
 </body>
 </html>
 HTML;
@@ -1494,6 +1802,117 @@ if (preg_match('#^/ratings/([^/]+)$#', $path, $m) && $method === 'GET') {
 }
 
 // ============================================================
+// === JURY: DETAIL PRIHLÁSENÉHO POROTCU (vrátane roly a stavu uzamknutia)
+// ============================================================
+if (preg_match('#^/jury/me/([^/]+)$#', $path, $m) && $method === 'GET') {
+    $evalId = trim($m[1]);
+    $evaluators = read_evaluators();
+    foreach ($evaluators as $ev) {
+        if ($ev['id'] === $evalId) {
+            send_json([
+                'id'          => $ev['id'],
+                'name'        => $ev['name'],
+                'email'       => $ev['email'] ?? '',
+                'role'        => $ev['role'] ?? 'evaluator',
+                'submittedAt' => $ev['submittedAt'] ?? '',
+                'isLocked'    => !empty($ev['submittedAt'])
+            ]);
+        }
+    }
+    send_json(['error' => 'Porotca nenájdený'], 404);
+}
+
+// ============================================================
+// === JURY: PRIEBEŽNÉ VÝSLEDKY (IBA PRE PREDSEDU POROTY)
+// ============================================================
+if ($path === '/jury/chairman-results' && $method === 'GET') {
+    $evalId = trim($_GET['evalId'] ?? '');
+    if (!$evalId) {
+        send_json(['error' => 'Chýba identifikátor porotcu'], 400);
+    }
+
+    $evaluators = read_evaluators();
+    $isChairman = false;
+    foreach ($evaluators as $ev) {
+        if ($ev['id'] === $evalId && ($ev['role'] ?? '') === 'chairman') {
+            $isChairman = true;
+            break;
+        }
+    }
+
+    if (!$isChairman) {
+        send_json(['error' => 'Priebežné hodnotenie je prístupné výhradne predsedovi poroty.'], 403);
+    }
+
+    $photos = read_registrations();
+
+    // Načítaj porotcov a hodnotenia
+    $scoresByPhoto = [];
+    if (file_exists(RATINGS_CSV)) {
+        $lines = file(RATINGS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        array_shift($lines); // header
+        foreach ($lines as $line) {
+            $r = str_getcsv($line);
+            $judgeId   = $r[0] ?? '';
+            $judgeName = $r[1] ?? '';
+            $photoId   = $r[2] ?? '';
+            $score     = (int)($r[3] ?? 0);
+            $createdAt = $r[4] ?? '';
+            if (!$photoId) continue;
+
+            if (!isset($scoresByPhoto[$photoId])) {
+                $scoresByPhoto[$photoId] = [
+                    'scores'  => [],
+                    'details' => []
+                ];
+            }
+            $scoresByPhoto[$photoId]['scores'][] = $score;
+            $scoresByPhoto[$photoId]['details'][] = [
+                'judgeId'   => $judgeId,
+                'judgeName' => $judgeName,
+                'score'     => $score,
+                'createdAt' => $createdAt
+            ];
+        }
+    }
+
+    $result = [];
+    foreach ($photos as $p) {
+        if (empty($p['webPath'])) continue;
+        $pid = $p['id'];
+        $sc = $scoresByPhoto[$pid]['scores'] ?? [];
+        $details = $scoresByPhoto[$pid]['details'] ?? [];
+        $total = array_sum($sc);
+        $count = count($sc);
+        $avg = $count > 0 ? round($total / $count, 2) : 0;
+
+        $result[] = [
+            'id'           => $p['id'],
+            'author'       => $p['author'] ?? '',
+            'category'     => $p['category'] ?? '',
+            'name'         => $p['name'] ?? '',
+            'webPath'      => $p['webPath'] ?? '',
+            'description'  => $p['description'] ?? '',
+            'metadata'     => $p['metadata'] ?? null,
+            'totalScore'   => $total,
+            'averageScore' => $avg,
+            'ratedCount'   => $count,
+            'judges'       => $details
+        ];
+    }
+
+    // Predvolené zoradenie podľa celkového počtu bodov zostupne, potom podľa priemeru
+    usort($result, function($a, $b) {
+        if ($b['totalScore'] !== $a['totalScore']) {
+            return $b['totalScore'] - $a['totalScore'];
+        }
+        return $b['averageScore'] <=> $a['averageScore'];
+    });
+
+    send_json($result);
+}
+
+// ============================================================
 // === JURY: BODOVANIE
 // ============================================================
 if ($path === '/rate' && $method === 'POST') {
@@ -1518,6 +1937,11 @@ if ($path === '/rate' && $method === 'POST') {
     if (!$matchedEvaluator) {
         dlog("RATE REJECTED: neznámy porotca evalId=$evalId");
         send_json(['error' => 'Neplatný alebo neexistujúci identifikátor porotcu'], 403);
+    }
+
+    // Overenie, či hodnotenie porotcu nie je uzamknuté
+    if (!empty($matchedEvaluator['submittedAt'])) {
+        send_json(['error' => 'Vaše hodnotenie je uzamknuté. Dodatočné zmeny musí povoliť administrátor alebo predseda poroty.'], 403);
     }
 
     // Overenie existencie fotografie
@@ -1561,6 +1985,286 @@ if ($path === '/rate' && $method === 'POST') {
     send_json(['success' => true]);
 }
 
+// ============================================================
+// === JURY: SUBMIT / UKONČENIE A UZAMKNUTIE HODNOTENIA
+// ============================================================
+if ($path === '/jury/submit' && $method === 'POST') {
+    $data = json_input();
+    $evalId = trim($data['evalId'] ?? '');
+    if (!$evalId) {
+        send_json(['error' => 'Chýba identifikátor porotcu'], 400);
+    }
+
+    $evaluators = read_evaluators();
+    $evaluator = null;
+    foreach ($evaluators as $ev) {
+        if ($ev['id'] === $evalId) {
+            $evaluator = $ev;
+            break;
+        }
+    }
+    if (!$evaluator) {
+        send_json(['error' => 'Porotca nenájdený'], 404);
+    }
+
+    if (!empty($evaluator['submittedAt'])) {
+        send_json(['error' => 'Hodnotenie už bolo odoslané a uzamknuté dňa ' . $evaluator['submittedAt']], 400);
+    }
+
+    // 1. Skontroluj, či sú naozaj VŠETKY fotografie ohodnotené
+    $photos = read_registrations();
+    $validPhotos = [];
+    foreach ($photos as $ph) {
+        if (!empty($ph['webPath'])) {
+            $validPhotos[$ph['id']] = $ph;
+        }
+    }
+    $totalCount = count($validPhotos);
+
+    $ratedPhotoIds = [];
+    if (file_exists(RATINGS_CSV)) {
+        $lines = file(RATINGS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        array_shift($lines);
+        foreach ($lines as $l) {
+            $r = str_getcsv($l);
+            if (($r[0] ?? '') === $evalId) {
+                $pid = $r[2] ?? '';
+                $score = (int)($r[3] ?? 0);
+                if ($pid && $score > 0 && isset($validPhotos[$pid])) {
+                    $ratedPhotoIds[$pid] = $score;
+                }
+            }
+        }
+    }
+
+    $unratedPhotos = [];
+    foreach ($validPhotos as $pid => $ph) {
+        if (!isset($ratedPhotoIds[$pid])) {
+            $unratedPhotos[] = [
+                'id'       => $ph['id'],
+                'name'     => $ph['name'],
+                'category' => $ph['category'],
+                'webPath'  => $ph['webPath']
+            ];
+        }
+    }
+
+    if (!empty($unratedPhotos)) {
+        send_json([
+            'error'         => 'Nie sú ohodnotené všetky fotografie. Pred odoslaním musíte ohodnotiť každé dielo.',
+            'unratedCount'  => count($unratedPhotos),
+            'unratedPhotos' => $unratedPhotos
+        ], 422);
+    }
+
+    // 2. Nastav submittedAt v EVALUATORS_CSV
+    $submittedAt = date('Y-m-d H:i:s');
+    $eRows = get_csv_rows(EVALUATORS_CSV);
+    if (!empty($eRows)) {
+        $header = array_shift($eRows);
+        while (count($header) < 5) $header[] = 'submittedAt';
+        foreach ($eRows as &$er) {
+            if (($er[0] ?? '') === $evalId) {
+                while (count($er) < 5) $er[] = '';
+                $er[4] = $submittedAt;
+                break;
+            }
+        }
+        unset($er);
+        array_unshift($eRows, $header);
+        write_csv_rows(EVALUATORS_CSV, $eRows);
+    }
+
+    dlog("EVALUATOR SUBMITTED: evalId=$evalId name={$evaluator['name']} at $submittedAt");
+
+    // 3. Nájdi predsedu poroty pre emailovú notifikáciu
+    $chairman = null;
+    foreach ($evaluators as $ev) {
+        if (($ev['role'] ?? '') === 'chairman' && !empty($ev['email'])) {
+            $chairman = $ev;
+            break;
+        }
+    }
+
+    $s = read_settings();
+    $contestName = $s['contestName'] ?? 'Speleofotografia 2026';
+    $evalName = $evaluator['name'];
+    $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https://' : 'http://';
+    $host = $_SERVER['HTTP_HOST'] ?? 'speleof26.sss.sk';
+
+    // Email predsedovi (alebo adminovi ak predseda nemá nastavený email)
+    $recipientEmail = '';
+    $chairmanName = '';
+    $chairmanLink = '';
+    if ($chairman && !empty($chairman['email'])) {
+        $recipientEmail = $chairman['email'];
+        $chairmanName = $chairman['name'];
+        $chairmanLink = $protocol . $host . '/?eval=' . $chairman['id'];
+    } else {
+        $recipientEmail = $s['adminEmail'] ?? ($s['emailFrom'] ?? 'admin@sss.sk');
+        $chairmanName = 'Predseda poroty / Administrátor';
+        $chairmanLink = $protocol . $host . '/#admin';
+    }
+
+    if (!empty($recipientEmail) && filter_var($recipientEmail, FILTER_VALIDATE_EMAIL)) {
+        $subject = "Porotca $evalName úspešne dokončil hodnotenie – $contestName";
+        $safeEvalName = htmlspecialchars($evalName, ENT_QUOTES, 'UTF-8');
+        $safeChairmanName = htmlspecialchars($chairmanName, ENT_QUOTES, 'UTF-8');
+        $safeSubmittedAt = htmlspecialchars($submittedAt, ENT_QUOTES, 'UTF-8');
+
+        $htmlBody = <<<HTML
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ukončenie hodnotenia porotcom</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f4f6f8; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f4f6f8; padding: 35px 12px;">
+    <tr>
+      <td align="center">
+        <table width="100%" cellpadding="0" cellspacing="0" style="max-width: 620px; background-color: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 14px rgba(0,0,0,0.06); border: 1px solid #e2e8f0;">
+          <tr>
+            <td style="background-color: #1e252b; padding: 32px 25px; text-align: center; border-bottom: 4px solid #e67e22;">
+              <div style="display: inline-block; background-color: #e67e22; color: #ffffff; font-size: 11px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; padding: 4px 14px; border-radius: 20px; margin-bottom: 12px;">
+                NOTIFIKÁCIA PRE PREDSEDU POROTY
+              </div>
+              <h1 style="margin: 0; color: #ffffff; font-size: 22px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase;">
+                $contestName
+              </h1>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 35px 30px; color: #2d3748; line-height: 1.6;">
+              <p style="font-size: 16px; margin: 0 0 16px 0; color: #1a202c;">
+                Vážený pán / pani <strong>$safeChairmanName</strong>,
+              </p>
+              <p style="font-size: 15px; margin: 0 0 20px 0; color: #4a5568;">
+                oznamujeme Vám, že člen odbornej poroty <strong>$safeEvalName</strong> práve úspešne ukončil a definitívne potvrdil svoje záverečné hodnotenie súťažných fotografií.
+              </p>
+              
+              <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #27ae60; border-radius: 6px; padding: 18px 20px; margin: 24px 0;">
+                <table width="100%" cellpadding="4" cellspacing="0" style="font-size: 14px;">
+                  <tr>
+                    <td style="color: #718096; width: 150px;">Porotca:</td>
+                    <td><strong>$safeEvalName</strong></td>
+                  </tr>
+                  <tr>
+                    <td style="color: #718096;">Ohodnotené diela:</td>
+                    <td><strong>$totalCount fotografií (100 %)</strong></td>
+                  </tr>
+                  <tr>
+                    <td style="color: #718096;">Čas odoslania:</td>
+                    <td><strong>$safeSubmittedAt</strong></td>
+                  </tr>
+                  <tr>
+                    <td style="color: #718096;">Stav hlasovania:</td>
+                    <td><span style="color: #27ae60; font-weight: bold;">✓ Uzamknuté (definitívne)</span></td>
+                  </tr>
+                </table>
+              </div>
+
+              <p style="font-size: 14px; margin: 20px 0 24px 0; color: #4a5568;">
+                Všetky udelené body boli započítané do priebežného poradia. V predsedovskom rozhraní si môžete kedykoľvek prezrieť celkové poradie súťažných prác vrátane mien autorov a kompletného bodového rozpisu poroty:
+              </p>
+
+              <div style="text-align: center; margin: 30px 0;">
+                <a href="$chairmanLink" style="display: inline-block; background-color: #e67e22; color: #ffffff; text-decoration: none; font-weight: 700; font-size: 14px; letter-spacing: 0.8px; text-transform: uppercase; padding: 14px 28px; border-radius: 6px; box-shadow: 0 4px 6px rgba(230, 126, 34, 0.25);">
+                  Zobraziť priebežné hodnotenie &rarr;
+                </a>
+              </div>
+
+              <p style="font-size: 12px; color: #718096; margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 16px;">
+                V prípade, že by bolo potrebné umožniť porotcovi dodatočné zmeny v bodovaní, jeho hodnotenie môžete Vy (ako predseda) alebo administrátor kedykoľvek odomknúť.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #f8fafc; padding: 18px 25px; text-align: center; border-top: 1px solid #e2e8f0; font-size: 11px; color: #a0aec0;">
+              $contestName &bull; Systém automatických notifikácií
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+HTML;
+
+        send_system_email($recipientEmail, $subject, $htmlBody);
+    }
+
+    send_json([
+        'status'      => 'ok',
+        'submittedAt' => $submittedAt,
+        'isLocked'    => true,
+        'message'     => 'Hodnotenie bolo úspešne odoslané a uzamknuté. Predseda poroty bol notifikovaný emailom.'
+    ]);
+}
+
+// ============================================================
+// === JURY: ODOMKNUTIE HODNOTENIA (ADMIN ALEBO PREDSEDA POROTY)
+// ============================================================
+if ($path === '/jury/unlock' && $method === 'POST') {
+    $data = json_input();
+    $targetEvalId   = trim($data['evalId'] ?? '');
+    $chairmanEvalId = trim($data['chairmanEvalId'] ?? '');
+
+    if (!$targetEvalId) {
+        send_json(['error' => 'Chýba ID porotcu na odomknutie'], 400);
+    }
+
+    // Overenie oprávnenia: buď platný admin token ALEBO predseda poroty
+    $isAuthorized = false;
+    $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+    if (preg_match('/Bearer\s+(\S+)/', $authHeader, $matches)) {
+        $token = $matches[1];
+        if (verify_token($token)) {
+            $isAuthorized = true;
+        }
+    }
+
+    if (!$isAuthorized && $chairmanEvalId) {
+        $evaluators = read_evaluators();
+        foreach ($evaluators as $ev) {
+            if ($ev['id'] === $chairmanEvalId && ($ev['role'] ?? '') === 'chairman') {
+                $isAuthorized = true;
+                break;
+            }
+        }
+    }
+
+    if (!$isAuthorized) {
+        send_json(['error' => 'Nemáte oprávnenie odomknúť hodnotenie. Povolené iba pre administrátora alebo predsedu poroty.'], 403);
+    }
+
+    $eRows = get_csv_rows(EVALUATORS_CSV);
+    $unlocked = false;
+    if (!empty($eRows)) {
+        $header = array_shift($eRows);
+        foreach ($eRows as &$er) {
+            if (($er[0] ?? '') === $targetEvalId) {
+                while (count($er) < 5) $er[] = '';
+                $er[4] = ''; // vymažeme submittedAt -> odomknuté!
+                $unlocked = true;
+                break;
+            }
+        }
+        unset($er);
+        array_unshift($eRows, $header);
+        write_csv_rows(EVALUATORS_CSV, $eRows);
+    }
+
+    if (!$unlocked) {
+        send_json(['error' => 'Porotca nenájdený'], 404);
+    }
+
+    dlog("EVALUATOR UNLOCKED: targetEvalId=$targetEvalId by admin/chairman");
+    send_json(['status' => 'ok', 'isLocked' => false, 'message' => 'Hodnotenie bolo úspešne odomknuté. Porotca môže znova meniť body.']);
+}
+
 if (in_array($path, ['/admin/bulk-upload', '/admin/stress-upload']) && $method === 'POST') {
     dlog("STRESS TEST: generating mock data");
     
@@ -1601,13 +2305,14 @@ if (preg_match('#^/admin/photos/([^/]+)$#', $path, $m) && $method === 'DELETE') 
     
     if (!file_exists(REGISTRATIONS_CSV)) send_json(['error' => 'Žiadne registrácie'], 404);
     
-    $lines = file(REGISTRATIONS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-    $header = array_shift($lines);
+    $rows = get_csv_rows(REGISTRATIONS_CSV);
+    if (empty($rows)) send_json(['error' => 'Žiadne registrácie'], 404);
+    
+    $header = array_shift($rows);
     $remaining = [];
     $found = false;
 
-    foreach ($lines as $line) {
-        $p = str_getcsv($line);
+    foreach ($rows as $p) {
         if (($p[0] ?? '') === $idToDelete) {
             $found = true;
             // Zmaž súbory
@@ -1623,12 +2328,13 @@ if (preg_match('#^/admin/photos/([^/]+)$#', $path, $m) && $method === 'DELETE') 
                 }
             }
         } else {
-            $remaining[] = $line;
+            $remaining[] = $p;
         }
     }
     
     if ($found) {
-        file_put_contents(REGISTRATIONS_CSV, $header . "\n" . implode("\n", $remaining) . ($remaining ? "\n" : ""), LOCK_EX);
+        array_unshift($remaining, $header);
+        write_csv_rows(REGISTRATIONS_CSV, $remaining);
         send_json(['success' => true]);
     } else {
         send_json(['error' => 'Fotografia nenájdená'], 404);
@@ -1646,13 +2352,15 @@ if (preg_match('#^/admin/photos/([^/]+)$#', $path, $m) && $method === 'PATCH') {
         send_json(['error' => 'Súbor s registráciami neexistuje'], 404);
     }
     
-    $lines = file(REGISTRATIONS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-    $header = array_shift($lines);
-    $found = false;
-    $newLines = [];
+    $rows = get_csv_rows(REGISTRATIONS_CSV);
+    if (empty($rows)) {
+        send_json(['error' => 'Fotografia nenájdená'], 404);
+    }
     
-    foreach ($lines as $line) {
-        $p = str_getcsv($line);
+    $header = array_shift($rows);
+    $found = false;
+    
+    foreach ($rows as &$p) {
         if (($p[0] ?? '') === $id) {
             $found = true;
             // 0:id, 1:author, 2:email, 3:instagram, 4:webpage, 5:address, 6:gdpr, 7:rules, 8:category, 9:name, 10:orig, 11:web, 12:desc, 13:meta, 14:date, 15:shortlisted
@@ -1665,20 +2373,18 @@ if (preg_match('#^/admin/photos/([^/]+)$#', $path, $m) && $method === 'PATCH') {
             if (isset($updates['name']))        $p[9] = $updates['name'];
             if (isset($updates['description'])) $p[12] = $updates['description'];
             if (isset($updates['shortlisted'])) $p[15] = ($updates['shortlisted'] === true || $updates['shortlisted'] === 'true' || $updates['shortlisted'] === 1) ? 'true' : 'false';
-            
-            $esc = fn($v) => '"' . str_replace('"', '""', $v) . '"';
-            $newLines[] = implode(',', array_map($esc, $p));
             dlog("ADMIN PHOTO PATCH: id=$id updated");
-        } else {
-            $newLines[] = $line;
+            break;
         }
     }
+    unset($p);
     
     if (!$found) {
         send_json(['error' => 'Fotografia nenájdená'], 404);
     }
     
-    file_put_contents(REGISTRATIONS_CSV, $header . "\n" . implode("\n", $newLines) . ($newLines ? "\n" : ""), LOCK_EX);
+    array_unshift($rows, $header);
+    write_csv_rows(REGISTRATIONS_CSV, $rows);
     send_json(['success' => true, 'id' => $id]);
 }
 
@@ -1699,11 +2405,10 @@ if ($path === '/admin/photos/delete-all' && $method === 'POST') {
     ensure_dir(DATA_DIR . '/backups');
     copy(REGISTRATIONS_CSV, DATA_DIR . '/backups/registrations_before_deleteall_' . date('Ymd_His') . '.csv.bak');
 
-    $lines = file(REGISTRATIONS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-    $header = array_shift($lines);
+    $rows = get_csv_rows(REGISTRATIONS_CSV);
+    $header = !empty($rows) ? array_shift($rows) : ["id","author","email","instagram","webpage","address","gdprConsent","rulesConsent","category","name","originalPath","webPath","description","metadata","createdAt","shortlisted"];
     
-    foreach ($lines as $line) {
-        $p = str_getcsv($line);
+    foreach ($rows as $p) {
         foreach ([10, 11] as $idx) {
             $file = $p[$idx] ?? '';
             if ($file) {
@@ -1715,7 +2420,7 @@ if ($path === '/admin/photos/delete-all' && $method === 'POST') {
     }
     
     // Vyčisti CSV (ponechaj len hlavičku)
-    file_put_contents(REGISTRATIONS_CSV, $header . "\n", LOCK_EX);
+    write_csv_rows(REGISTRATIONS_CSV, [$header]);
     
     // Vyčisti aj adresáre (pre istotu – zmaže všetko čo tam ostalo)
     $cleanDir = function($dir) {
@@ -1761,14 +2466,17 @@ if ($path === '/admin/photos/bulk-delete' && $method === 'POST') {
         send_json(['error' => 'Žiadne registrácie'], 404);
     }
 
-    $lines = file(REGISTRATIONS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-    $header = array_shift($lines);
+    $rows = get_csv_rows(REGISTRATIONS_CSV);
+    if (empty($rows)) {
+        send_json(['error' => 'Žiadne registrácie'], 404);
+    }
+
+    $header = array_shift($rows);
     $idSet = array_flip($ids);
     $remaining = [];
     $deletedCount = 0;
 
-    foreach ($lines as $line) {
-        $p = str_getcsv($line);
+    foreach ($rows as $p) {
         $id = $p[0] ?? '';
         if (isset($idSet[$id])) {
             // Zmaž web súbor (uploads/)
@@ -1792,11 +2500,12 @@ if ($path === '/admin/photos/bulk-delete' && $method === 'POST') {
             $deletedCount++;
             dlog("BULK DELETE: id=$id");
         } else {
-            $remaining[] = $line;
+            $remaining[] = $p;
         }
     }
 
-    file_put_contents(REGISTRATIONS_CSV, $header . "\n" . implode("\n", $remaining) . ($remaining ? "\n" : ""), LOCK_EX);
+    array_unshift($remaining, $header);
+    write_csv_rows(REGISTRATIONS_CSV, $remaining);
     send_json(['success' => true, 'deleted' => $deletedCount]);
 }
 
@@ -1821,27 +2530,27 @@ if ($path === '/admin/photos/bulk-category' && $method === 'POST') {
     ensure_dir(DATA_DIR . '/backups');
     copy(REGISTRATIONS_CSV, DATA_DIR . '/backups/registrations_' . date('Ymd_His') . '.csv.bak');
 
-    $lines = file(REGISTRATIONS_CSV, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-    $header = array_shift($lines);
+    $rows = get_csv_rows(REGISTRATIONS_CSV);
+    if (empty($rows)) {
+        send_json(['error' => 'Žiadne registrácie'], 404);
+    }
+
+    $header = array_shift($rows);
     $idSet = array_flip($ids);
     $updatedCount = 0;
-    $newLines = [];
 
-    foreach ($lines as $line) {
-        $p = str_getcsv($line);
+    foreach ($rows as &$p) {
         $id = $p[0] ?? '';
         if (isset($idSet[$id])) {
             $p[8] = $newCategory; // category index
-            $esc = fn($v) => '"' . str_replace('"', '""', $v) . '"';
-            $newLines[] = implode(',', array_map($esc, $p));
             $updatedCount++;
             dlog("BULK CATEGORY: id=$id -> $newCategory");
-        } else {
-            $newLines[] = $line;
         }
     }
+    unset($p);
 
-    file_put_contents(REGISTRATIONS_CSV, $header . "\n" . implode("\n", $newLines) . ($newLines ? "\n" : ""), LOCK_EX);
+    array_unshift($rows, $header);
+    write_csv_rows(REGISTRATIONS_CSV, $rows);
     send_json(['success' => true, 'updated' => $updatedCount]);
 }
 

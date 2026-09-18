@@ -9,10 +9,13 @@ coverage/
 !.env.example
 
 # Exclude all data and uploads (keep folder structure via .gitkeep)
+*.csv
 data/*.json
 data/*.csv
 data/*.sql
 !data/.gitkeep
+scripts/*.log
+scripts/*_report.txt
 uploads/**/*
 !uploads/.gitkeep
 !uploads/originals/.gitkeep

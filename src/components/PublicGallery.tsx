@@ -132,7 +132,17 @@ export default function PublicGallery({ lang, isIframe = false }: { lang: Lang, 
   const fetchPhotos = async () => {
     try {
       const res = await fetch("/api/public/gallery");
-      if (res.ok) setPhotos(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        setPhotos(data);
+        // Automatické otvorenie fotky, ak je v URL zadaný parameter ?photo=ID
+        const params = new URLSearchParams(window.location.search);
+        const photoParam = params.get("photo");
+        if (photoParam) {
+          const found = data.find((p: PublicPhoto) => p.id === photoParam);
+          if (found) setSelectedPhoto(found);
+        }
+      }
       setLoading(false);
     } catch (e) {
       console.error(e);
@@ -170,20 +180,30 @@ export default function PublicGallery({ lang, isIframe = false }: { lang: Lang, 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ photoId, fingerprint, turnstileToken: token })
       });
-      
-      const data = await res.json();
 
       if (res.ok) {
-        const newVoted = [...votedIds, photoId];
-        setVotedIds(newVoted);
-        localStorage.setItem("speleo_voted_ids", JSON.stringify(newVoted));
-        setPhotos(prev => prev.map(p => 
-          p.id === photoId ? { ...p, voteCount: (p.voteCount || 0) + 1 } : p
-        ));
-        setShowTurnstileModal(false);
-        setVotingPhotoId(null);
-        fetchStats(); // Obnoviť celkový počet hlasov
+        const data = await res.json();
+        if (data.success) {
+          const newVoted = [...votedIds, photoId];
+          setVotedIds(newVoted);
+          setPhotos(prev => prev.map(p => 
+            p.id === photoId ? { ...p, voteCount: (p.voteCount || 0) + 1 } : p
+          ));
+          if (selectedPhoto && selectedPhoto.id === photoId) {
+            setSelectedPhoto(prev => prev ? { ...prev, voteCount: (prev.voteCount || 0) + 1 } : null);
+          }
+          setVotedIds(prev => [...prev, photoId]);
+          localStorage.setItem("speleo_voted_ids", JSON.stringify([...votedIds, photoId]));
+          setTimeout(() => {
+            setShowTurnstileModal(false);
+            setVotingPhotoId(null);
+          }, 1500);
+          fetchStats();
+        } else {
+          setTurnstileError(data.error || (lang === "sk" ? "Chyba pri hlasovaní" : "Error voting"));
+        }
       } else {
+        const data = await res.json().catch(() => ({}));
         setTurnstileError(data.error || (lang === "sk" ? "Chyba pri hlasovaní" : "Error voting"));
         if (res.status === 429) {
           setVotedIds(prev => [...prev, photoId]);
@@ -202,8 +222,10 @@ export default function PublicGallery({ lang, isIframe = false }: { lang: Lang, 
     }
   };
 
-  const copyShareLink = (photo: PublicPhoto) => {
-    const url = `${window.location.origin}/?view=public&photo=${photo.id}`;
+  const copyShareLink = (photo?: PublicPhoto | null) => {
+    const url = photo 
+      ? `${window.location.origin}/gallery?photo=${photo.id}`
+      : `${window.location.origin}/gallery`;
     navigator.clipboard.writeText(url).then(() => {
       setCopiedLink(true);
       setTimeout(() => setCopiedLink(false), 2000);
@@ -265,6 +287,26 @@ export default function PublicGallery({ lang, isIframe = false }: { lang: Lang, 
             ? "Prezrite si súťažné fotografie a dajte hlas svojim favoritom. Autori sú počas hlasovania anonymizovaní." 
             : "Explore competition photographs and vote for your favorites. Authors remain anonymous during voting."}
         </p>
+
+        {/* Tlačidlo priameho zdieľania galérie */}
+        <div className="flex justify-center pt-1">
+          <button
+            onClick={() => copyShareLink(null)}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-white hover:bg-paper border border-border hover:border-ink text-ink text-[11px] font-bold uppercase tracking-wider transition-all shadow-sm rounded-sm"
+          >
+            {copiedLink ? (
+              <>
+                <Check size={14} className="text-emerald-600" />
+                <span className="text-emerald-600">{lang === "sk" ? "Odkaz na galériu skopírovaný!" : "Gallery link copied!"}</span>
+              </>
+            ) : (
+              <>
+                <Share2 size={14} />
+                <span>{lang === "sk" ? "Kopírovať priamy odkaz na galériu" : "Copy direct gallery link"}</span>
+              </>
+            )}
+          </button>
+        </div>
 
         {/* Live Public Stats Bar */}
         {publicStats && (
@@ -513,7 +555,7 @@ export default function PublicGallery({ lang, isIframe = false }: { lang: Lang, 
                 {/* Story / Description */}
                 <div className="space-y-2 pb-5 border-b border-border">
                   <p className="text-[9px] font-bold uppercase tracking-widest text-muted">{lang === "sk" ? "Príbeh fotografie" : "Photo Story"}</p>
-                  <p className="text-xs md:text-sm text-balance leading-relaxed text-muted/90 max-h-48 overflow-y-auto">
+                  <p className="text-xs md:text-sm leading-relaxed text-muted/90 whitespace-pre-wrap max-h-64 overflow-y-auto pr-2">
                     {selectedPhoto.description || (lang === "sk" ? "Bez sprievodného textu." : "No description provided.")}
                   </p>
                 </div>

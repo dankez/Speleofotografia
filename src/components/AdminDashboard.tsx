@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, ChangeEvent } from "react";
-import { BarChart3, Users, Image as ImageIcon, Link as LinkIcon, Plus, Copy, Check, Download, Trash2, Eye, Shield, Settings as SettingsIcon, Mail, UserPlus, Heart, Code, ExternalLink, X, User, LayoutGrid, List, Search, Edit2, TrendingUp, Activity, FileText, Zap, Upload, AlertTriangle, Sparkles, RotateCw, ArrowUpDown, ArrowUp, ArrowDown, Clock, ChevronLeft, ChevronRight, Printer, Send } from "lucide-react";
+import { BarChart3, Users, Image as ImageIcon, Link as LinkIcon, Plus, Copy, Check, Download, Trash2, Eye, Shield, Settings as SettingsIcon, Mail, UserPlus, Heart, Code, ExternalLink, X, User, LayoutGrid, List, Search, Edit2, TrendingUp, Activity, FileText, Zap, Upload, AlertTriangle, Sparkles, RotateCw, ArrowUpDown, ArrowUp, ArrowDown, Clock, ChevronLeft, ChevronRight, Printer, Send, Crown, Loader2, Lock, Unlock } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "@/src/lib/utils";
 import type { Photo, Evaluator } from "../types";
@@ -73,7 +73,12 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
   const [dashboardStats, setDashboardStats] = useState<any>(null);
   const [newEvalName, setNewEvalName] = useState("");
   const [newEvalEmail, setNewEvalEmail] = useState("");
+  const [newEvalRole, setNewEvalRole] = useState<"evaluator" | "chairman">("evaluator");
   const [sendingInviteId, setSendingInviteId] = useState<string | null>(null);
+  const [editingEvaluator, setEditingEvaluator] = useState<{ id: string; name: string; email: string; role?: string } | null>(null);
+  const [isSavingEval, setIsSavingEval] = useState(false);
+  const [deletingEvalId, setDeletingEvalId] = useState<string | null>(null);
+  const [unlockingEvalId, setUnlockingEvalId] = useState<string | null>(null);
   const [showPrintProtocol, setShowPrintProtocol] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
@@ -942,9 +947,23 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
   const sendEvalInvite = async (evalId: string, email?: string) => {
     let targetEmail = email;
     if (!targetEmail) {
-      const input = prompt(lang === "sk" ? "Zadajte emailovú adresu porotcu:" : "Enter jury member email address:");
+      const found = evaluators.find(e => e.id === evalId);
+      const def = found?.email || "";
+      const input = prompt(
+        lang === "sk" 
+          ? "Zadajte emailovú adresu porotcu na odoslanie pozvánky:" 
+          : "Enter jury member email address to send invitation:",
+        def
+      );
       if (!input || !input.trim()) return;
       targetEmail = input.trim();
+    } else {
+      const confirmSend = window.confirm(
+        lang === "sk"
+          ? `Odoslať oficiálnu pozvánku do poroty na email: ${targetEmail}?`
+          : `Send official jury invitation to: ${targetEmail}?`
+      );
+      if (!confirmSend) return;
     }
     
     setSendingInviteId(evalId);
@@ -957,6 +976,7 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
       const data = await res.json();
       if (res.ok) {
         alert(lang === "sk" ? `Pozvánka bola úspešne odoslaná na ${targetEmail}` : `Invitation successfully sent to ${targetEmail}`);
+        fetchData();
       } else {
         alert(data.error || (lang === "sk" ? "Chyba pri odosielaní emailu" : "Failed to send email"));
       }
@@ -969,19 +989,106 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
 
   const createEvaluator = async () => {
     if (!newEvalName.trim()) return;
-    const res = await fetchWithAuth("/api/evaluators", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: newEvalName.trim() })
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (newEvalEmail.trim() && data.id) {
-        await sendEvalInvite(data.id, newEvalEmail.trim());
+    try {
+      const res = await fetchWithAuth("/api/evaluators", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          name: newEvalName.trim(),
+          email: newEvalEmail.trim(),
+          role: newEvalRole
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (newEvalEmail.trim() && data.id) {
+          await sendEvalInvite(data.id, newEvalEmail.trim());
+        }
+        setNewEvalName("");
+        setNewEvalEmail("");
+        setNewEvalRole("evaluator");
+        fetchData();
+      } else {
+        const err = await res.json();
+        alert(err.error || (lang === "sk" ? "Chyba pri vytváraní porotcu" : "Error creating evaluator"));
       }
-      setNewEvalName("");
-      setNewEvalEmail("");
-      fetchData();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const updateEvaluator = async () => {
+    if (!editingEvaluator || !editingEvaluator.name.trim()) return;
+    setIsSavingEval(true);
+    try {
+      const res = await fetchWithAuth(`/api/evaluators/${editingEvaluator.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: editingEvaluator.name.trim(),
+          email: editingEvaluator.email.trim(),
+          role: editingEvaluator.role || "evaluator"
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setEditingEvaluator(null);
+        fetchData();
+      } else {
+        alert(data.error || (lang === "sk" ? "Chyba pri úprave porotcu" : "Failed to update evaluator"));
+      }
+    } catch (e) {
+      alert(lang === "sk" ? "Chyba spojenia so serverom" : "Server connection error");
+    } finally {
+      setIsSavingEval(false);
+    }
+  };
+
+  const deleteEvaluator = async (evalu: Evaluator) => {
+    const confirmMsg = lang === "sk"
+      ? `Naozaj chcete zmazať porotcu "${evalu.name}" a všetky jeho hodnotenia (${evalu.ratedCount || 0} fotografií)?\n\nTáto akcia je nevratná.`
+      : `Are you sure you want to delete jury member "${evalu.name}" and all their ratings (${evalu.ratedCount || 0} photos)?\n\nThis action cannot be undone.`;
+    
+    if (!window.confirm(confirmMsg)) return;
+
+    setDeletingEvalId(evalu.id);
+    try {
+      const res = await fetchWithAuth(`/api/evaluators/${evalu.id}`, {
+        method: "DELETE"
+      });
+      const data = await res.json();
+      if (res.ok) {
+        fetchData();
+      } else {
+        alert(data.error || (lang === "sk" ? "Chyba pri mazaní porotcu" : "Failed to delete evaluator"));
+      }
+    } catch (e) {
+      alert(lang === "sk" ? "Chyba spojenia so serverom" : "Server connection error");
+    } finally {
+      setDeletingEvalId(null);
+    }
+  };
+
+  const unlockEvaluator = async (targetId: string) => {
+    if (!confirm(lang === "sk" ? "Naozaj chcete odomknúť hodnotenie tohto porotcu? Umožníte mu tak znova upravovať a meniť body." : "Are you sure you want to unlock this jury member's evaluation? This will allow them to edit scores again.")) return;
+    setUnlockingEvalId(targetId);
+    try {
+      const res = await fetchWithAuth("/api/jury/unlock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ evalId: targetId })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert(lang === "sk" ? "Hodnotenie porotcu bolo úspešne odomknuté." : "Evaluator's ratings were unlocked successfully.");
+        fetchData();
+      } else {
+        alert(data.error || (lang === "sk" ? "Chyba pri odomykaní" : "Unlock error"));
+      }
+    } catch (e) {
+      alert(lang === "sk" ? "Chyba spojenia" : "Connection error");
+    } finally {
+      setUnlockingEvalId(null);
     }
   };
 
@@ -3529,7 +3636,7 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
 
                         <div className="space-y-1.5 border-t border-border pt-4">
                           <p className="text-[9px] text-muted uppercase font-bold tracking-widest">{lang === "sk" ? "Popis / Príbeh" : "Description / Story"}</p>
-                          <p className="text-xs text-muted leading-relaxed whitespace-pre-wrap max-h-28 overflow-y-auto pr-1">
+                          <p className="text-xs text-muted leading-relaxed whitespace-pre-wrap max-h-60 overflow-y-auto pr-1">
                             {selectedPhoto.description || "No description provided."}
                           </p>
                         </div>
@@ -3652,7 +3759,7 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                   value={newEvalName}
                   onChange={e => setNewEvalName(e.target.value)}
                   placeholder={lang === "sk" ? "Meno a priezvisko porotcu *" : "Jury Member Name *"}
-                  className="sm:col-span-6 border border-border p-3.5 text-sm outline-none focus:border-ink"
+                  className="sm:col-span-5 border border-border p-3.5 text-sm outline-none focus:border-ink"
                 />
                 <input 
                   type="email" 
@@ -3661,10 +3768,18 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                   placeholder={lang === "sk" ? "Email (voliteľný – odošle pozvánku)" : "Email (optional – sends invite)"}
                   className="sm:col-span-4 border border-border p-3.5 text-sm outline-none focus:border-ink"
                 />
+                <select
+                  value={newEvalRole}
+                  onChange={e => setNewEvalRole(e.target.value as "evaluator" | "chairman")}
+                  className="sm:col-span-2 border border-border p-3.5 text-xs outline-none bg-white font-medium focus:border-ink"
+                >
+                  <option value="evaluator">{lang === "sk" ? "Porotca" : "Evaluator"}</option>
+                  <option value="chairman">{lang === "sk" ? "👑 Predseda" : "👑 Chairman"}</option>
+                </select>
                 <button 
                   onClick={createEvaluator}
                   disabled={!newEvalName.trim()}
-                  className="sm:col-span-2 px-4 py-3.5 bg-ink text-white text-[10px] font-bold uppercase tracking-[2px] hover:opacity-90 transition-opacity disabled:opacity-50"
+                  className="sm:col-span-1 px-2 py-3.5 bg-ink text-white text-[10px] font-bold uppercase tracking-[2px] hover:opacity-90 transition-opacity disabled:opacity-50 text-center"
                 >
                   {lang === "sk" ? "Pridať" : "Add"}
                 </button>
@@ -3685,32 +3800,100 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
                   </div>
                 ) : (
                   evaluators.map(evalu => (
-                    <div key={evalu.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-5 gap-4">
-                      <div className="space-y-1">
-                        <p className="font-bold uppercase tracking-wider text-ink text-sm">{evalu.name}</p>
-                        <div className="flex items-center gap-3 text-[10px] text-muted">
+                    <div key={evalu.id} className="flex flex-col lg:flex-row items-start lg:items-center justify-between p-5 gap-4 hover:bg-paper/40 transition-colors">
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-2.5">
+                          <p className="font-bold uppercase tracking-wider text-ink text-sm">{evalu.name}</p>
+                          {evalu.role === "chairman" ? (
+                            <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-amber-100 text-amber-900 border border-amber-300 rounded flex items-center gap-1">
+                              <Crown size={10} className="text-amber-600" />
+                              {lang === "sk" ? "Predseda poroty" : "Jury Chairman"}
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-paper text-muted border border-border rounded">
+                              {lang === "sk" ? "Porotca" : "Evaluator"}
+                            </span>
+                          )}
+                          {evalu.isLocked ? (
+                            <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-green-100 text-green-900 border border-green-300 rounded flex items-center gap-1" title={evalu.submittedAt ? `Odoslané: ${evalu.submittedAt}` : "Uzamknuté"}>
+                              <Lock size={10} className="text-green-700" />
+                              {lang === "sk" ? "Odoslané (Uzamknuté)" : "Submitted (Locked)"}
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-paper text-muted border border-border rounded flex items-center gap-1">
+                              <Clock size={10} />
+                              {lang === "sk" ? "Hodnotí" : "In Progress"}
+                            </span>
+                          )}
+                          {evalu.email && (
+                            <span className="text-xs text-muted flex items-center gap-1 font-normal lowercase">
+                              <Mail size={12} className="text-muted/70" /> {evalu.email}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2.5 text-[10px] text-muted">
                           <span className="font-mono bg-paper px-2 py-0.5 border border-border">ID: {evalu.id}</span>
-                          <span>{lang === "sk" ? "Hodnotených:" : "Rated:"} <strong>{evalu.ratedCount || 0}</strong> {lang === "sk" ? "fotografií" : "photos"}</span>
+                          <span className="bg-paper px-2 py-0.5 border border-border">
+                            {lang === "sk" ? "Hodnotených:" : "Rated:"} <strong className="text-ink">{evalu.ratedCount || 0}</strong> {lang === "sk" ? "fotografií" : "photos"}
+                          </span>
+                          {evalu.submittedAt && (
+                            <span className="bg-green-50 text-green-800 px-2 py-0.5 border border-green-200">
+                              {lang === "sk" ? "Ukončené:" : "Submitted:"} {evalu.submittedAt}
+                            </span>
+                          )}
+                          {!evalu.email && (
+                            <span className="text-amber-600 text-[9px] font-semibold">
+                              {lang === "sk" ? "⚠️ Email nezadaný" : "⚠️ No email"}
+                            </span>
+                          )}
                         </div>
                       </div>
-                      <div className="flex items-center gap-2 w-full sm:w-auto">
+                      <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
+                        {evalu.isLocked && (
+                          <button 
+                            onClick={() => unlockEvaluator(evalu.id)}
+                            disabled={unlockingEvalId === evalu.id}
+                            className="px-3 py-2 text-[9px] uppercase font-bold tracking-widest border border-amber-300 text-amber-900 bg-amber-50 hover:bg-amber-100 transition-all flex items-center gap-1.5 disabled:opacity-50"
+                            title={lang === "sk" ? "Odomknúť porotcovi možnosť meniť body" : "Unlock ratings for this juror"}
+                          >
+                            {unlockingEvalId === evalu.id ? <Loader2 size={12} className="animate-spin" /> : <Unlock size={12} />}
+                            <span>{lang === "sk" ? "Odomknúť" : "Unlock"}</span>
+                          </button>
+                        )}
+                        <button 
+                          onClick={() => setEditingEvaluator({ id: evalu.id, name: evalu.name, email: evalu.email || "", role: evalu.role || "evaluator" })}
+                          className="px-3 py-2 text-[9px] uppercase font-bold tracking-widest border border-border bg-white hover:border-ink hover:text-ink text-muted transition-all flex items-center gap-1.5"
+                          title={lang === "sk" ? "Upraviť meno, email a rolu" : "Edit name, email and role"}
+                        >
+                          <Edit2 size={12} />
+                          <span>{lang === "sk" ? "Upraviť" : "Edit"}</span>
+                        </button>
                         <button 
                           onClick={() => copyEvalLink(evalu.id)}
                           className={cn(
-                            "flex-1 sm:flex-none px-4 py-2.5 text-[9px] uppercase font-bold tracking-widest border transition-all flex items-center justify-center gap-1.5",
+                            "px-3 py-2 text-[9px] uppercase font-bold tracking-widest border transition-all flex items-center gap-1.5",
                             copiedId === evalu.id ? "bg-accent text-white border-accent" : "border-border hover:border-ink text-ink bg-white"
                           )}
                         >
                           {copiedId === evalu.id ? <Check size={12} /> : <Copy size={12} />}
-                          {copiedId === evalu.id ? (lang === "sk" ? "Skopírované" : "Copied") : (lang === "sk" ? "Kopírovať Link" : "Copy Link")}
+                          <span>{copiedId === evalu.id ? (lang === "sk" ? "Skopírované" : "Copied") : (lang === "sk" ? "Link" : "Link")}</span>
                         </button>
                         <button 
-                          onClick={() => sendEvalInvite(evalu.id)}
+                          onClick={() => sendEvalInvite(evalu.id, evalu.email)}
                           disabled={sendingInviteId === evalu.id}
-                          className="flex-1 sm:flex-none px-4 py-2.5 text-[9px] uppercase font-bold tracking-widest border border-border bg-ink text-white hover:opacity-90 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+                          className="px-3.5 py-2 text-[9px] uppercase font-bold tracking-widest border border-border bg-ink text-white hover:opacity-90 transition-all flex items-center gap-1.5 disabled:opacity-50"
                         >
                           {sendingInviteId === evalu.id ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
-                          {sendingInviteId === evalu.id ? (lang === "sk" ? "Odosielam..." : "Sending...") : (lang === "sk" ? "Poslať Pozvánku" : "Send Invite")}
+                          <span>{sendingInviteId === evalu.id ? (lang === "sk" ? "Odosielam..." : "Sending...") : (lang === "sk" ? "Poslať Pozvánku" : "Send Invite")}</span>
+                        </button>
+                        <button 
+                          onClick={() => deleteEvaluator(evalu)}
+                          disabled={deletingEvalId === evalu.id}
+                          className="px-3 py-2 text-[9px] uppercase font-bold tracking-widest border border-red-200 text-red-600 bg-red-50/50 hover:bg-red-600 hover:text-white transition-all flex items-center gap-1.5 disabled:opacity-50"
+                          title={lang === "sk" ? "Zmazať porotcu a jeho hodnotenia" : "Delete jury member and their ratings"}
+                        >
+                          {deletingEvalId === evalu.id ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                          <span>{lang === "sk" ? "Zmazať" : "Delete"}</span>
                         </button>
                       </div>
                     </div>
@@ -3721,6 +3904,101 @@ export default function AdminDashboard({ lang }: { lang: Lang }) {
           </div>
         )}
       </div>
+
+      {/* Edit Evaluator Modal */}
+      <AnimatePresence>
+        {editingEvaluator && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/70 backdrop-blur-xs">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white border border-border w-full max-w-md p-6 md:p-8 space-y-6 shadow-2xl"
+            >
+              <div className="flex justify-between items-center border-b border-border pb-3">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-ink">
+                  {lang === "sk" ? "Upraviť porotcu" : "Edit Jury Member"}
+                </h3>
+                <button 
+                  onClick={() => setEditingEvaluator(null)}
+                  className="text-muted hover:text-ink transition-colors p-1"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-muted">
+                    {lang === "sk" ? "Meno a priezvisko porotcu *" : "Jury Member Name *"}
+                  </label>
+                  <input 
+                    type="text" 
+                    value={editingEvaluator.name}
+                    onChange={e => setEditingEvaluator({ ...editingEvaluator, name: e.target.value })}
+                    className="w-full border border-border p-3 text-sm outline-none focus:border-ink"
+                    placeholder="Meno porotcu"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-muted">
+                    {lang === "sk" ? "Emailová adresa" : "Email Address"}
+                  </label>
+                  <input 
+                    type="email" 
+                    value={editingEvaluator.email}
+                    onChange={e => setEditingEvaluator({ ...editingEvaluator, email: e.target.value })}
+                    className="w-full border border-border p-3 text-sm outline-none focus:border-ink"
+                    placeholder="porotca@priklad.sk"
+                  />
+                  <p className="text-[10px] text-muted">
+                    {lang === "sk" 
+                      ? "Na tento email bude možné opakovane posielať oficiálnu pozvánku s privátnym odkazom." 
+                      : "Official invitation with private evaluation link will be sent to this email."}
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-muted">
+                    {lang === "sk" ? "Pozícia / Rola v porote" : "Jury Role"}
+                  </label>
+                  <select
+                    value={editingEvaluator.role || "evaluator"}
+                    onChange={e => setEditingEvaluator({ ...editingEvaluator, role: e.target.value })}
+                    className="w-full border border-border p-3 text-sm outline-none bg-white focus:border-ink"
+                  >
+                    <option value="evaluator">{lang === "sk" ? "Člen poroty (bežný porotca)" : "Jury Member (standard)"}</option>
+                    <option value="chairman">{lang === "sk" ? "👑 Predseda poroty (priebežné poradie, autori a zoom)" : "👑 Jury Chairman (live table, authors & zoom)"}</option>
+                  </select>
+                  <p className="text-[10px] text-muted">
+                    {editingEvaluator.role === "chairman" 
+                      ? (lang === "sk" ? "Predseda poroty má špeciálny prístup k tabuľke priebežného hodnotenia s menami autorov a zoom náhľadmi." : "Jury Chairman has special access to intermediate scoring table with author names and zoom.") 
+                      : (lang === "sk" ? "Bežný porotca vidí anonymný dashboard fotografií pre vlastné hodnotenie." : "Regular jury member only sees anonymous photo dashboard for their own scoring.")}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-border">
+                <button 
+                  onClick={() => setEditingEvaluator(null)}
+                  className="px-5 py-2.5 border border-border text-muted hover:text-ink text-[10px] font-bold uppercase tracking-widest transition-colors"
+                >
+                  {lang === "sk" ? "Zrušiť" : "Cancel"}
+                </button>
+                <button 
+                  onClick={updateEvaluator}
+                  disabled={isSavingEval || !editingEvaluator.name.trim()}
+                  className="px-6 py-2.5 bg-ink text-white text-[10px] font-bold uppercase tracking-widest hover:opacity-90 transition-opacity flex items-center gap-2 disabled:opacity-50"
+                >
+                  {isSavingEval && <Loader2 size={12} className="animate-spin" />}
+                  <span>{isSavingEval ? (lang === "sk" ? "Ukladám..." : "Saving...") : (lang === "sk" ? "Uložiť zmeny" : "Save Changes")}</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Print Protocol Modal */}
       <AnimatePresence>

@@ -74,13 +74,101 @@ export interface Settings {
   }[];
 }
 
+// Pomocná funkcia na detekciu pohľadu z URL (cesta, query parametre, hash)
+function parseViewFromLocation(): { view: View; evalId: string | null; token: string | null } {
+  if (typeof window === "undefined") return { view: "home", evalId: null, token: null };
+
+  const pathname = window.location.pathname.toLowerCase().replace(/\/+$/, "");
+  const params = new URLSearchParams(window.location.search);
+  const hash = window.location.hash.toLowerCase().replace(/^#\/?/, "");
+
+  const evalId = params.get("eval");
+  if (evalId) return { view: "evaluator", evalId, token: null };
+
+  const token = params.get("token");
+  if (token) return { view: "admin-setup", evalId: null, token };
+
+  // 1. Priama URL cesta (/gallery, /galeria, /results, /admin, atď.)
+  if (pathname === "/gallery" || pathname === "/galeria" || pathname.endsWith("/gallery") || pathname.endsWith("/galeria")) {
+    return { view: "public", evalId: null, token: null };
+  }
+  if (pathname === "/results" || pathname === "/vysledky" || pathname.endsWith("/results") || pathname.endsWith("/vysledky")) {
+    return { view: "results", evalId: null, token: null };
+  }
+  if (pathname === "/admin" || pathname.endsWith("/admin")) {
+    return { view: "admin", evalId: null, token: null };
+  }
+  if (pathname === "/admin-setup" || pathname === "/setup" || pathname.endsWith("/admin-setup") || pathname.endsWith("/setup")) {
+    return { view: "admin-setup", evalId: null, token: null };
+  }
+  if (pathname === "/form" || pathname === "/registracia" || pathname.endsWith("/form") || pathname.endsWith("/registracia")) {
+    return { view: "home", evalId: null, token: null };
+  }
+
+  // 2. Query parameter (?view=...)
+  const viewParam = params.get("view")?.toLowerCase();
+  if (viewParam === "public" || viewParam === "gallery" || viewParam === "galeria") {
+    return { view: "public", evalId: null, token: null };
+  }
+  if (viewParam === "results" || viewParam === "vysledky") {
+    return { view: "results", evalId: null, token: null };
+  }
+  if (viewParam === "admin") {
+    return { view: "admin", evalId: null, token: null };
+  }
+  if (viewParam === "admin-setup") {
+    return { view: "admin-setup", evalId: null, token: null };
+  }
+  if (viewParam === "home" || viewParam === "form" || viewParam === "registracia") {
+    return { view: "home", evalId: null, token: null };
+  }
+
+  // 3. Hash fallback (#gallery, #galeria, atď.)
+  if (hash === "gallery" || hash === "galeria" || hash === "public") {
+    return { view: "public", evalId: null, token: null };
+  }
+  if (hash === "results" || hash === "vysledky") {
+    return { view: "results", evalId: null, token: null };
+  }
+  if (hash === "admin") {
+    return { view: "admin", evalId: null, token: null };
+  }
+
+  return { view: "home", evalId: null, token: null };
+}
+
 export default function App() {
-  const [currentView, setCurrentView] = useState<View>("home");
-  const [evalId, setEvalId] = useState<string | null>(null);
+  const initialRoute = parseViewFromLocation();
+  const [currentView, setCurrentView] = useState<View>(initialRoute.view);
+  const [evalId, setEvalId] = useState<string | null>(initialRoute.evalId);
   const [lang, setLang] = useState<Lang>("sk");
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loading, setLoading] = useState(true);
   const [isIframe, setIsIframe] = useState(false);
+
+  // Navigácia so zmenou URL a históriou prehliadača
+  const navigateToView = (view: View, replace = false) => {
+    setCurrentView(view);
+
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      let targetPath = "/";
+      if (view === "public") targetPath = "/gallery";
+      else if (view === "results") targetPath = "/results";
+      else if (view === "admin") targetPath = "/admin";
+      else if (view === "admin-setup") targetPath = "/admin-setup";
+      else targetPath = "/";
+
+      url.pathname = targetPath;
+      url.searchParams.delete("view"); // Odstránenie starého ?view parametra
+
+      if (replace) {
+        window.history.replaceState({ view }, "", url.toString());
+      } else {
+        window.history.pushState({ view }, "", url.toString());
+      }
+    }
+  };
 
   useEffect(() => {
     // Detekcia iframe (automatická + manuálna cez parameter)
@@ -88,22 +176,17 @@ export default function App() {
     const isIframeMode = window.self !== window.top || params.get("mode") === "iframe";
     setIsIframe(isIframeMode);
 
-    // Explicitné nastavenie pohľadu cez URL
-    const viewParam = params.get("view") as View;
-    if (viewParam && ["home", "admin", "evaluator", "admin-setup", "public", "results"].includes(viewParam)) {
-      setCurrentView(viewParam);
-    }
+    // Reakcia na tlačidlá Späť / Dopredu v prehliadači
+    const handlePopState = () => {
+      const route = parseViewFromLocation();
+      setCurrentView(route.view);
+      if (route.evalId) setEvalId(route.evalId);
+    };
+    window.addEventListener("popstate", handlePopState);
 
-    const evalParam = params.get("eval");
-    if (evalParam) {
-      setEvalId(evalParam);
-      setCurrentView("evaluator");
-    }
-    const tokenParam = params.get("token");
-    if (tokenParam) {
-      setCurrentView("admin-setup");
-    }
     fetchSettings();
+
+    return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
   useEffect(() => {
@@ -120,9 +203,10 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         setSettings(data);
-        const params = new URLSearchParams(window.location.search);
-        if (data.contestStatus === "results" && !params.get("view") && !params.get("eval") && !params.get("token")) {
-          setCurrentView("results");
+        const parsed = parseViewFromLocation();
+        // Ak sú vyhlásené výsledky a používateľ je na čistej domovskej stránke bez explicitného výberu
+        if (data.contestStatus === "results" && parsed.view === "home" && window.location.pathname === "/" && !window.location.search && !window.location.hash) {
+          navigateToView("results", true);
         }
       }
     } catch (e) {
@@ -178,7 +262,7 @@ export default function App() {
         <aside className="w-[240px] bg-[#f9f9f9] border-r border-border p-6 flex flex-col justify-between shrink-0 hidden md:flex">
           <div>
             <button 
-              onClick={() => setCurrentView("home")}
+              onClick={() => navigateToView("home")}
               className="w-full text-left mb-10 group"
             >
               {settings?.logoUrl && (
@@ -197,7 +281,7 @@ export default function App() {
               {navItems.map((item) => (
                 <button
                   key={item.id}
-                  onClick={() => setCurrentView(item.id as View)}
+                  onClick={() => navigateToView(item.id as View)}
                   className={cn(
                     "w-full text-left py-3 text-[13px] font-medium transition-all uppercase tracking-widest border-b border-transparent",
                     currentView === item.id 
@@ -241,17 +325,59 @@ export default function App() {
       <main className="flex-1 flex flex-col overflow-hidden">
         {/* Header Bar - skrytý v iframe */}
         {!isIframe && (
-          <header className="h-16 px-10 border-b border-border flex items-center justify-between bg-white shrink-0">
-            <div>
-              <h1 className="text-[18px] font-light tracking-tight">
+          <header className="min-h-16 px-4 md:px-10 py-2 border-b border-border flex flex-wrap items-center justify-between gap-3 bg-white shrink-0">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => navigateToView("home")}
+                className="text-[16px] md:text-[18px] font-light tracking-tight text-left hover:text-accent transition-colors"
+              >
                 {currentView === "home" && (lang === "sk" ? "Prihláška / Application Form" : "Application Form")}
                 {currentView === "public" && (lang === "sk" ? "Galéria / Gallery" : "Public Gallery")}
                 {currentView === "admin" && (lang === "sk" ? "Administrácia / Admin" : "Admin Dashboard")}
                 {currentView === "evaluator" && (lang === "sk" ? "Hodnotenie / Evaluation" : "Evaluation System")}
-              </h1>
+                {currentView === "results" && (lang === "sk" ? "Výsledky / Results" : "Results")}
+              </button>
             </div>
-            <div className="bg-accent text-white text-[10px] px-2 py-1 font-bold tracking-widest uppercase">
-              SECURE ACCESS
+
+            {/* Navigácia a prepínače pre mobil aj desktop */}
+            <div className="flex items-center gap-2">
+              {/* Mobilné prepínače pohľadov (viditeľné len na mobiloch) */}
+              <div className="flex md:hidden items-center gap-1 border border-border p-0.5 rounded-sm">
+                <button
+                  onClick={() => navigateToView("public")}
+                  className={cn(
+                    "px-2.5 py-1 text-[10px] uppercase font-bold tracking-wider rounded-sm transition-all",
+                    currentView === "public" ? "bg-ink text-white" : "text-muted hover:text-ink"
+                  )}
+                >
+                  {lang === "sk" ? "Galéria" : "Gallery"}
+                </button>
+                <button
+                  onClick={() => navigateToView("home")}
+                  className={cn(
+                    "px-2.5 py-1 text-[10px] uppercase font-bold tracking-wider rounded-sm transition-all",
+                    currentView === "home" ? "bg-ink text-white" : "text-muted hover:text-ink"
+                  )}
+                >
+                  {lang === "sk" ? "Prihláška" : "Form"}
+                </button>
+              </div>
+
+              {/* Jazykový prepínač pre mobil */}
+              <div className="flex md:hidden gap-1 border border-border p-0.5 rounded-sm">
+                <button 
+                  onClick={() => setLang("sk")}
+                  className={cn("text-[9px] uppercase font-bold px-1.5 py-0.5", lang === "sk" ? "bg-ink text-paper" : "text-muted")}
+                >SK</button>
+                <button 
+                  onClick={() => setLang("en")}
+                  className={cn("text-[9px] uppercase font-bold px-1.5 py-0.5", lang === "en" ? "bg-ink text-paper" : "text-muted")}
+                >EN</button>
+              </div>
+
+              <div className="hidden md:block bg-accent text-white text-[10px] px-2 py-1 font-bold tracking-widest uppercase">
+                SECURE ACCESS
+              </div>
             </div>
           </header>
         )}
@@ -295,7 +421,7 @@ export default function App() {
                           </p>
                         </div>
                         <button 
-                          onClick={() => setCurrentView("public")}
+                          onClick={() => navigateToView("public")}
                           className="px-10 py-4 bg-ink text-white text-[10px] font-bold uppercase tracking-[2px]"
                         >
                           {lang === "sk" ? "Prezrieť galériu" : "View Gallery"}

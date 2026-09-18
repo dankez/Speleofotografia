@@ -21,7 +21,11 @@ export interface Registration {
 export interface Evaluator {
   id: string;
   name: string;
-  role: string;
+  email?: string;
+  role?: string;
+  ratedCount?: number;
+  submittedAt?: string;
+  isLocked?: boolean;
 }
 
 export type ContestStatus = "submissions" | "review" | "judging" | "shortlist" | "results";
@@ -48,4 +52,23 @@ export interface Rating {
   photoId: string;
   judgeId: string;
   score: number;
+}
+
+export interface ChairmanPhotoResult {
+  id: string;
+  author: string;
+  category: string;
+  name: string;
+  webPath: string;
+  description: string;
+  metadata?: any;
+  totalScore: number;
+  averageScore: number;
+  ratedCount: number;
+  judges: {
+    judgeId: string;
+    judgeName: string;
+    score: number;
+    createdAt?: string;
+  }[];
 }
